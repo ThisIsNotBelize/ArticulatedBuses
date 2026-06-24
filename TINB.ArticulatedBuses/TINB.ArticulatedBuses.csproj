@@ -1,0 +1,159 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Library</OutputType>
+    <AssemblyName>TINB.ArticulatedBuses</AssemblyName>
+    <RootNamespace>TINB.ArticulatedBuses</RootNamespace>
+    <TargetFramework>net48</TargetFramework>
+    <LangVersion>latest</LangVersion>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>false</ImplicitUsings>
+    <Configurations>Debug;Release</Configurations>
+    <CopyLocalLockFileAssemblies>false</CopyLocalLockFileAssemblies>
+    <PublishConfigurationPath>Properties\PublishConfiguration.xml</PublishConfigurationPath>
+    <CsiiToolPath Condition="'$(CsiiToolPath)' == ''">$([System.Environment]::GetEnvironmentVariable('CSII_TOOLPATH', 'EnvironmentVariableTarget.User'))</CsiiToolPath>
+    <Cities2InstallDir Condition="'$(Cities2InstallDir)' == ''">D:\SteamLibrary\steamapps\common\Cities Skylines II</Cities2InstallDir>
+    <Cities2ManagedDir>$(Cities2InstallDir)\Cities2_Data\Managed</Cities2ManagedDir>
+
+    <!-- Visual Studio builds deploy the mod DLL into the local CS2 Mods folder by default.
+         Override LocalModsPath/ModFolderName/DeployDir, or set DeployLocalMod=false to disable. -->
+    <LocalModsPath Condition="'$(LocalModsPath)' == ''">$(LocalAppData)\..\LocalLow\Colossal Order\Cities Skylines II\Mods</LocalModsPath>
+    <ModFolderName Condition="'$(ModFolderName)' == ''">$(AssemblyName)</ModFolderName>
+    <DeployDir Condition="'$(DeployDir)' == ''">$(LocalModsPath)\$(ModFolderName)</DeployDir>
+    <DeployLocalMod Condition="'$(DeployLocalMod)' == ''">true</DeployLocalMod>
+    <DeploySymbols Condition="'$(DeploySymbols)' == '' and '$(Configuration)' == 'Debug'">true</DeploySymbols>
+    <DeploySymbols Condition="'$(DeploySymbols)' == ''">false</DeploySymbols>
+    <EnableDiagnosticLogging Condition="'$(EnableDiagnosticLogging)' == '' and '$(Configuration)' == 'Debug'">true</EnableDiagnosticLogging>
+    <EnableDiagnosticLogging Condition="'$(EnableDiagnosticLogging)' == ''">false</EnableDiagnosticLogging>
+  </PropertyGroup>
+
+  <PropertyGroup Condition="'$(Configuration)' == 'Release'">
+    <!-- A PDB must be produced even in Release: the EILPP post-processor (run with -d) needs it.
+         The shipped artifact stays symbol-free because DeploySymbols defaults false in Release and
+         StripReleaseSymbolsFromPublishContent deletes the PDB after post-processing (same approach as
+         the WE-Module's belzont_public.targets). DebugType=none here previously starved the
+         post-processor of a PDB and broke the Release build. -->
+    <DebugType>portable</DebugType>
+    <DebugSymbols>true</DebugSymbols>
+  </PropertyGroup>
+
+  <PropertyGroup Condition="'$(EnableDiagnosticLogging)' == 'true'">
+    <DefineConstants>$(DefineConstants);ARTICULATEDBUSES_DIAGNOSTICS</DefineConstants>
+  </PropertyGroup>
+
+  <Import Project="$(CsiiToolPath)\Mod.props" Condition="'$(CsiiToolPath)' != '' and Exists('$(CsiiToolPath)\Mod.props')" />
+  <Import Project="$(CsiiToolPath)\Mod.targets" Condition="'$(CsiiToolPath)' != '' and Exists('$(CsiiToolPath)\Mod.targets')" />
+
+  <PropertyGroup>
+    <ModId>148570</ModId>
+    <Version>1.0.1</Version>
+    <GameVersion>1.6.*</GameVersion>
+    <ThumbnailPath>Properties/Thumbnail.png</ThumbnailPath>
+    <DisplayName>Articulated Buses</DisplayName>
+    <ShortDescription>Enables articulated bus assets by spawning fixed trailer sections for compatible bus prefabs.</ShortDescription>
+    <ForumLink>https://forum.paradoxplaza.com/forum/threads/articulated-buses-mod.1930913/</ForumLink>
+    <GitHubLink></GitHubLink>
+    <YoutubeLink></YoutubeLink>
+    <KofiLink></KofiLink>
+    <BMACLink></BMACLink>
+    <CrowdinLink></CrowdinLink>
+    <TwitterLink></TwitterLink>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ModTag Include="Code Mod" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Reference Include="Game">
+      <HintPath>$(Cities2ManagedDir)\Game.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="Colossal.Core">
+      <HintPath>$(Cities2ManagedDir)\Colossal.Core.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="Colossal.IO.AssetDatabase">
+      <HintPath>$(Cities2ManagedDir)\Colossal.IO.AssetDatabase.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="Colossal.AssetPipeline">
+      <HintPath>$(Cities2ManagedDir)\Colossal.AssetPipeline.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="Colossal.Collections">
+      <HintPath>$(Cities2ManagedDir)\Colossal.Collections.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="Colossal.Logging">
+      <HintPath>$(Cities2ManagedDir)\Colossal.Logging.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="Colossal.Mathematics">
+      <HintPath>$(Cities2ManagedDir)\Colossal.Mathematics.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="Unity.Collections">
+      <HintPath>$(Cities2ManagedDir)\Unity.Collections.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="Unity.Entities">
+      <HintPath>$(Cities2ManagedDir)\Unity.Entities.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="Unity.Mathematics">
+      <HintPath>$(Cities2ManagedDir)\Unity.Mathematics.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="UnityEngine.CoreModule">
+      <HintPath>$(Cities2ManagedDir)\UnityEngine.CoreModule.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="System.Memory">
+      <HintPath>$(Cities2ManagedDir)\System.Memory.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+  </ItemGroup>
+
+  <ItemGroup>
+    <EmbeddedResource Include="changelog.md" Condition="Exists('changelog.md')" />
+    <None Include="$(ModPropsFile)" Link="Properties\Mod.props" Condition="'$(ModPropsFile)' != '' and Exists('$(ModPropsFile)')" />
+    <None Include="$(ModTargetsFile)" Link="Properties\Mod.targets" Condition="'$(ModTargetsFile)' != '' and Exists('$(ModTargetsFile)')" />
+  </ItemGroup>
+
+  <Target Name="DeployLocalMod" AfterTargets="Build" Condition="'$(DeployLocalMod)' == 'true' and '$(ModTargetsFile)' == ''">
+    <ItemGroup>
+      <LocalModFiles Include="$(TargetPath)" />
+      <LocalModFiles Include="$(TargetDir)$(TargetName).pdb" Condition="'$(DeploySymbols)' == 'true' and Exists('$(TargetDir)$(TargetName).pdb')" />
+    </ItemGroup>
+    <MakeDir Directories="$(DeployDir)" />
+    <Copy SourceFiles="@(LocalModFiles)" DestinationFolder="$(DeployDir)" SkipUnchangedFiles="true" />
+    <Message Text="Deployed $(AssemblyName) to $(DeployDir)" Importance="high" />
+  </Target>
+
+  <Target Name="CustomModPostProcessorConfig" AfterTargets="ModPostProcessorConfig" Condition="'$(ModTargetsFile)' != ''">
+    <PropertyGroup>
+      <!-- Build only the Windows Burst target (CleanNonWindowsArtifacts removes any mac/Linux output),
+           but always pass -d: it is the EILPP post-processor's own flag, required for it to succeed in
+           both Debug and Release. The toolchain default and other working mods (e.g. the WE-Module's
+           belzont_public.targets) keep -d unconditionally; Release symbol stripping is handled
+           separately by StripReleaseSymbolsFromPublishContent. -->
+      <ModPostProcessorArgs>"$(ModPostProcessorFullPath)" PostProcess "$(TargetPath)" -u "$(UnityModProjectFullPath)" @(ReferencePath->'-r &quot;%(Identity)&quot;', ' ') -p Windows -d -v</ModPostProcessorArgs>
+    </PropertyGroup>
+  </Target>
+
+  <Target Name="CleanNonWindowsArtifacts" AfterTargets="Build">
+    <ItemGroup>
+      <NonWindowsArtifacts Include="$(TargetDir)$(TargetName)_linux_x86_64.so" />
+      <NonWindowsArtifacts Include="$(TargetDir)$(TargetName)_mac_x86_64.bundle" />
+    </ItemGroup>
+    <Delete Files="@(NonWindowsArtifacts)" />
+  </Target>
+
+  <Target Name="StripReleaseSymbolsFromPublishContent" AfterTargets="DeployWIP;DeployLocalMod" BeforeTargets="ModPublisherConfig" Condition="'$(Configuration)' == 'Release' and '$(DeploySymbols)' != 'true'">
+    <ItemGroup>
+      <ReleaseSymbols Include="$(TargetDir)**\*.pdb" />
+      <ReleaseSymbols Include="$(DeployDir)\**\*.pdb" Condition="'$(DeployDir)' != ''" />
+    </ItemGroup>
+    <Delete Files="@(ReleaseSymbols)" />
+  </Target>
+</Project>

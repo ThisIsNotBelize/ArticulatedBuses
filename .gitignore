@@ -1,0 +1,11 @@
+bin/
+obj/
+*.user
+*.suo
+.vs/
+
+# Unity-generated mod cache
+Library/
+
+# Decompiled game source — large external reference, regenerable, not part of the mod
+_SourceReference/
