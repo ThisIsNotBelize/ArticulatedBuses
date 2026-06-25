@@ -26,14 +26,6 @@ namespace TINB.ArticulatedBuses
         private readonly Dictionary<Entity, FrontColorState> m_LastSyncedFront = new Dictionary<Entity, FrontColorState>();
         private readonly Dictionary<Entity, bool> m_TrailerPrefabIsBrand = new Dictionary<Entity, bool>();
 
-        /* Drops the cached colour state for a front so the next sync re-pushes its colour to the trailer(s).
-           Called after a trailer is respawned on depot deploy, so the fresh trailer immediately gets the
-           front's current livery and any custom repaint instead of waiting for the next front colour change. */
-        internal void ForgetFront(Entity front)
-        {
-            m_LastSyncedFront.Remove(front);
-        }
-
         private EntityQuery m_BusQuery;
         private EndFrameBarrier m_Barrier = null!;
 

@@ -21,6 +21,7 @@ namespace TINB.ArticulatedBuses
         private readonly HashSet<Entity> m_RuntimeLinkedTrailers = new HashSet<Entity>();
         private readonly HashSet<Entity> m_ColorSyncedTrailers = new HashSet<Entity>();
         private readonly HashSet<Entity> m_ActivityLocationSyncedBuses = new HashSet<Entity>();
+        private readonly HashSet<Entity> m_InflatedFronts = new HashSet<Entity>();
 
         private EntityQuery m_BusPrefabQuery;
 
@@ -110,6 +111,7 @@ namespace TINB.ArticulatedBuses
 
             SyncTrailerColors(entityManager, busPrefab, trailerPrefab, diagnosticLogging);
             SyncTrailerActivityLocations(entityManager, busPrefab, trailerPrefab, tractorData, trailerData, diagnosticLogging);
+            InflateFrontParkingLength(entityManager, busPrefab, trailerPrefab, tractorData, trailerData, diagnosticLogging);
 
             if (trailerData.m_FixedTractor == busPrefab)
             {
@@ -132,6 +134,49 @@ namespace TINB.ArticulatedBuses
             if (diagnosticLogging && m_RuntimeLinkedTrailers.Add(trailerPrefab))
             {
                 Mod.Log.InfoFormat("Applied runtime-only articulated bus reverse link from trailer prefab {0} to bus prefab {1}", trailerPrefab, busPrefab);
+            }
+        }
+
+        /* Extends the front prefab's logical length (ObjectGeometryData.m_Bounds along z) to cover the WHOLE
+           assembled bus (front + trailer) — computed from both prefabs' geometry bounds and their attach offsets,
+           so it is correct for any creator's asset dimensions. With the front reported this long, the return
+           pathfind rejects every single-bus depot bay (bay m_MaxCarLength < full bus length) and the bus always
+           GARAGES instead of surface-parking, so the trailer never overhangs the driveway and is never bay-parked.
+           Only m_Bounds is read by GetParkingSize; extending it changes the culling/collision/parking footprint
+           only, NOT the visible mesh (so the bus still looks and selects normally). */
+        private void InflateFrontParkingLength(EntityManager entityManager, Entity busPrefab, Entity trailerPrefab, CarTractorData tractorData, CarTrailerData trailerData, bool diagnosticLogging)
+        {
+            if (!m_InflatedFronts.Add(busPrefab) ||
+                !entityManager.HasComponent<ObjectGeometryData>(busPrefab) ||
+                !entityManager.HasComponent<ObjectGeometryData>(trailerPrefab))
+            {
+                return;
+            }
+
+            ObjectGeometryData frontGeometry = entityManager.GetComponentData<ObjectGeometryData>(busPrefab);
+            ObjectGeometryData trailerGeometry = entityManager.GetComponentData<ObjectGeometryData>(trailerPrefab);
+
+            /* When assembled straight, the trailer origin sits at (front attach - trailer attach) relative to the
+               front, so shift the trailer's z-bounds by that offset and union with the front's z-bounds */
+            float trailerOffsetZ = tractorData.m_AttachPosition.z - trailerData.m_AttachPosition.z;
+            float combinedMinZ = math.min(frontGeometry.m_Bounds.min.z, trailerOffsetZ + trailerGeometry.m_Bounds.min.z);
+            float combinedMaxZ = math.max(frontGeometry.m_Bounds.max.z, trailerOffsetZ + trailerGeometry.m_Bounds.max.z);
+
+            float currentLength = frontGeometry.m_Bounds.max.z - frontGeometry.m_Bounds.min.z;
+            float combinedLength = combinedMaxZ - combinedMinZ;
+            if (combinedLength <= currentLength)
+            {
+                return; // front bounds already span the whole bus (or unexpected geometry) -> nothing to do
+            }
+
+            frontGeometry.m_Bounds.min.z = combinedMinZ;
+            frontGeometry.m_Bounds.max.z = combinedMaxZ;
+            frontGeometry.m_Size.z = combinedLength;
+            entityManager.SetComponentData(busPrefab, frontGeometry);
+
+            if (diagnosticLogging)
+            {
+                Mod.Log.InfoFormat("Inflated front {0} parking length {1:F2}m -> {2:F2}m (full bus, force depot garaging)", busPrefab, currentLength, combinedLength);
             }
         }
 

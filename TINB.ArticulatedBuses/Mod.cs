@@ -34,7 +34,8 @@ namespace TINB.ArticulatedBuses
             updateSystem.UpdateAfter<ArticulatedBusPrefabConstraintSystem, Game.Prefabs.VehicleInitializeSystem>(SystemUpdatePhase.PrefabUpdate);
             updateSystem.UpdateBefore<ArticulatedBusTrailerSpawnSystem, Game.Vehicles.InitializeSystem>(SystemUpdatePhase.Modification5);
             updateSystem.UpdateAfter<ArticulatedBusOrphanTrailerCleanupSystem, ArticulatedBusTrailerSpawnSystem>(SystemUpdatePhase.Modification5);
-            updateSystem.UpdateAfter<ArticulatedBusParkedTrailerSystem, ArticulatedBusTrailerSpawnSystem>(SystemUpdatePhase.Modification5);
+            updateSystem.UpdateAfter<ArticulatedBusParkedFrontFixSystem, ArticulatedBusTrailerSpawnSystem>(SystemUpdatePhase.Modification5);
+            updateSystem.UpdateAfter<ArticulatedBusTrailerRestoreSystem, ArticulatedBusParkedFrontFixSystem>(SystemUpdatePhase.Modification5);
             updateSystem.UpdateAt<ArticulatedBusIconCreatorCompatSystem>(SystemUpdatePhase.Modification1);
             updateSystem.UpdateAfter<ArticulatedBusConnectionBoneSystem, Game.Rendering.ObjectInterpolateSystem>(SystemUpdatePhase.Rendering);
             updateSystem.UpdateBefore<ArticulatedBusConnectionBoneSystem, Game.Rendering.ProceduralSkeletonSystem>(SystemUpdatePhase.Rendering);

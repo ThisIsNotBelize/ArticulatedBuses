@@ -166,9 +166,9 @@ namespace TINB.ArticulatedBuses
                 entityManager.AddComponent<Unspawned>(trailer);
             }
 
-            /* Get-or-add then rebuild so this is safe both for the initial spawn (no buffer yet) and for a
-               redeploy respawn, where the front still carries a [front]-only LayoutElement (the parked trailer
-               was deleted and vanilla ReferencesSystem shrank the buffer) */
+            /* Get-or-add then rebuild so this works for the initial spawn (no buffer yet) AND for the migration
+               restore path, where a 1.0.1-contaminated front still carries a [front]-only LayoutElement (its
+               trailer was deleted by the old parked logic and ReferencesSystem shrank the buffer) */
             DynamicBuffer<LayoutElement> layout = entityManager.HasComponent<LayoutElement>(bus)
                 ? entityManager.GetBuffer<LayoutElement>(bus)
                 : entityManager.AddBuffer<LayoutElement>(bus);

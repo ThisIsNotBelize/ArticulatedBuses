@@ -54,13 +54,17 @@ This mod is a **temporary solution**. Articulated buses are not yet a base-game 
 
 What changes when the mod is removed: any articulated bus in your city will remain intact - except for the bending. New buses will not spawn a trailer. The **front bus asset keeps working** as an ordinary single-section bus — it stays on its line, carries passengers, and behaves normally.
 
-*Final note: this mod was created with some help of coding-agents*
+Final note: this mod was created with some help of coding-agents
 </LongDescription>
   <Thumbnail Value="Properties/Thumbnail.png" />
   <ForumLink Value="https://forum.paradoxplaza.com/forum/threads/articulated-buses-mod.1930913/" />
-  <ModVersion Value="1.0.1" />
+  <ModVersion Value="1.0.2" />
   <GameVersion Value="1.6.*" />
-  <ChangeLog># v1.0.1
+  <ChangeLog># v1.0.2
+- Fix: upgrading or extending a bus depot no longer crashes to desktop when articulated buses are stationed there (a crash that could occur in 1.0.1).
+- Fix: articulated buses now garage inside the depot instead of surface-parking, so the trailer no longer overhangs and blocks the depot driveway.
+
+# v1.0.1
 - Fix: parked articulated buses are now un-spawning, so they no longer block the depot driveway or hold up other buses. Caveat: no articulated bus can be observed parked, but that's the trade-off.
 
 # v1.0.0
