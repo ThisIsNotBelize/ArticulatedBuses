@@ -1,0 +1,49 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- Pure-logic unit tests for the articulated bus. Deliberately STANDALONE (not in the mod .sln) so the mod's
+       normal `dotnet build` never has to restore the test packages. Run with:
+         dotnet test TINB.ArticulatedBuses.Tests\TINB.ArticulatedBuses.Tests.csproj
+
+       It does NOT reference the mod DLL or Game.dll. Instead it COMPILES the pure helper source file directly
+       (ArticulatedBusGeometry.cs), so the only dependency is Unity.Mathematics — the tests can never accidentally
+       pull in the ECS / game runtime. -->
+
+  <PropertyGroup>
+    <TargetFramework>net48</TargetFramework>
+    <LangVersion>latest</LangVersion>
+    <Nullable>enable</Nullable>
+    <IsPackable>false</IsPackable>
+    <Configurations>Debug;Release</Configurations>
+
+    <Cities2InstallDir Condition="'$(Cities2InstallDir)' == ''">D:\SteamLibrary\steamapps\common\Cities Skylines II</Cities2InstallDir>
+    <Cities2ManagedDir>$(Cities2InstallDir)\Cities2_Data\Managed</Cities2ManagedDir>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.11.1" />
+    <PackageReference Include="NUnit" Version="3.14.0" />
+    <PackageReference Include="NUnit3TestAdapter" Version="4.6.0" />
+  </ItemGroup>
+
+  <!-- Compile the production pure-helper source directly (shared implementation, no DLL coupling). -->
+  <ItemGroup>
+    <Compile Include="..\TINB.ArticulatedBuses\ArticulatedBusGeometry.cs" Link="ArticulatedBusGeometry.cs" />
+  </ItemGroup>
+
+  <!-- Unity.Mathematics + its load-time companions, copied locally so the test host can resolve them. -->
+  <ItemGroup>
+    <Reference Include="Unity.Mathematics">
+      <HintPath>$(Cities2ManagedDir)\Unity.Mathematics.dll</HintPath>
+      <Private>true</Private>
+    </Reference>
+    <Reference Include="Unity.Burst">
+      <HintPath>$(Cities2ManagedDir)\Unity.Burst.dll</HintPath>
+      <Private>true</Private>
+    </Reference>
+    <Reference Include="System.Runtime.CompilerServices.Unsafe">
+      <HintPath>$(Cities2ManagedDir)\System.Runtime.CompilerServices.Unsafe.dll</HintPath>
+      <Private>true</Private>
+    </Reference>
+  </ItemGroup>
+
+</Project>

@@ -66,8 +66,18 @@ namespace TINB.ArticulatedBuses
             {
                 for (int i = 0; i < buses.Length; i++)
                 {
-                    TrySpawnTrailer(entityManager, buses[i], Mod.IsDiagnosticLoggingEnabled());
+                    Entity bus = buses[i];
+                    Entity trailer = TrySpawnTrailer(entityManager, bus, Mod.IsDiagnosticLoggingEnabled());
+                    if (trailer != Entity.Null)
+                    {
+                        ArticulatedBusSessionStats.TrailerSpawned();
+                        SessionLog.Event($"spawned trailer {trailer} for new bus front {bus}");
+                    }
                 }
+            }
+            catch (System.Exception ex)
+            {
+                SessionLog.Exception($"{nameof(ArticulatedBusTrailerSpawnSystem)}.OnUpdate", ex);
             }
             finally
             {
@@ -141,8 +151,8 @@ namespace TINB.ArticulatedBuses
 
             ObjectTransform transform = entityManager.GetComponentData<ObjectTransform>(bus);
             ObjectTransform trailerTransform = transform;
-            trailerTransform.m_Position += Unity.Mathematics.math.rotate(transform.m_Rotation, tractorData.m_AttachPosition);
-            trailerTransform.m_Position -= Unity.Mathematics.math.rotate(transform.m_Rotation, trailerData.m_AttachPosition);
+            trailerTransform.m_Position += ArticulatedBusGeometry.ComputeTrailerOffset(
+                transform.m_Rotation, tractorData.m_AttachPosition, trailerData.m_AttachPosition);
 
             entityManager.SetComponentData(trailer, trailerTransform);
             entityManager.SetComponentData(trailer, new PrefabRef(trailerPrefab));

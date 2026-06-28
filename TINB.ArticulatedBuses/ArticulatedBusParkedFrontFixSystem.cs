@@ -85,12 +85,18 @@ namespace TINB.ArticulatedBuses
                     }
 
                     entityManager.RemoveComponent<LayoutElement>(front);
+                    ArticulatedBusSessionStats.FrontFixed();
+                    SessionLog.Event($"healed leftover 1.0.1 parked front {front}: stripped trailerless layout (depot-upgrade CTD precondition); trailer re-attaches on next deploy");
 
                     if (diagnosticLogging)
                     {
                         Mod.Log.InfoFormat("Fixed leftover 1.0.1 parked articulated bus front {0} (stripped trailerless layout so a depot upgrade can't crash); trailer re-attaches on next deploy", front);
                     }
                 }
+            }
+            catch (System.Exception ex)
+            {
+                SessionLog.Exception($"{nameof(ArticulatedBusParkedFrontFixSystem)}.OnUpdate", ex);
             }
             finally
             {

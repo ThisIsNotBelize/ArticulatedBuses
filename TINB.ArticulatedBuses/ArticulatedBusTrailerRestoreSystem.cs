@@ -77,11 +77,21 @@ namespace TINB.ArticulatedBuses
                     }
 
                     Entity restored = ArticulatedBusTrailerSpawnSystem.TrySpawnTrailer(entityManager, front, diagnosticLogging);
-                    if (restored != Entity.Null && diagnosticLogging)
+                    if (restored != Entity.Null)
                     {
-                        Mod.Log.InfoFormat("Restored missing trailer {0} for articulated bus front {1} (integrity)", restored, front);
+                        ArticulatedBusSessionStats.TrailerRestored();
+                        SessionLog.Event($"restored missing trailer {restored} for articulated bus front {front} (integrity)");
+
+                        if (diagnosticLogging)
+                        {
+                            Mod.Log.InfoFormat("Restored missing trailer {0} for articulated bus front {1} (integrity)", restored, front);
+                        }
                     }
                 }
+            }
+            catch (System.Exception ex)
+            {
+                SessionLog.Exception($"{nameof(ArticulatedBusTrailerRestoreSystem)}.OnUpdate", ex);
             }
             finally
             {

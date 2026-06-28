@@ -9,3 +9,7 @@ Library/
 
 # Decompiled game source — large external reference, regenerable, not part of the mod
 _SourceReference/
+
+# Collected player/mod logs from bug reporters (by date + forum username) — may contain
+# machine paths / usernames; not part of the mod
+_UserLogs/

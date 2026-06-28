@@ -578,7 +578,7 @@ namespace TINB.ArticulatedBuses
                 }
 
                 quaternion relative = math.mul(math.inverse(neighborTransform.m_Rotation), currentTransform.m_Rotation);
-                quaternion neighborChainRotation = math.slerp(quaternion.identity, relative, 0.5f / math.max(1, n));
+                quaternion neighborChainRotation = math.slerp(quaternion.identity, relative, ArticulatedBusGeometry.ConnectionBoneFraction(n));
                 capNaturalLocal = ComputeBoneObjectMatrix(neighborBones, neighborCapIndex, neighborChainRotation).c3.xyz;
                 return true;
             }
@@ -647,7 +647,7 @@ namespace TINB.ArticulatedBuses
                 neighborRotation = math.mul(inverseCurrentRotation, previousTransform.m_Rotation);
             }
 
-            float chainFraction = 0.5f / math.max(1, connectionBoneCount);
+            float chainFraction = ArticulatedBusGeometry.ConnectionBoneFraction(connectionBoneCount);
             quaternion chainRotation = math.slerp(quaternion.identity, neighborRotation, chainFraction);
 
             /* Midpoint of natural caps. Inner bones run the untouched pure-rotation fan. The cap
@@ -666,7 +666,7 @@ namespace TINB.ArticulatedBuses
                 float3 myCapNaturalLocal = ComputeBoneObjectMatrix(proceduralBones, capIndex, chainRotation).c3.xyz;
                 float3 myCapWorld = currentTransform.m_Position + math.rotate(currentTransform.m_Rotation, myCapNaturalLocal);
                 float3 neighborCapWorld = neighborTransform.m_Position + math.rotate(neighborTransform.m_Rotation, neighborCapLocal);
-                float3 meetingWorld = (myCapWorld + neighborCapWorld) * 0.5f;
+                float3 meetingWorld = ArticulatedBusGeometry.CapMidpoint(myCapWorld, neighborCapWorld);
 
                 capTargetObject = math.rotate(inverseCurrentRotation, meetingWorld - currentTransform.m_Position);
                 capRepositioned = true;

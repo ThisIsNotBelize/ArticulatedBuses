@@ -49,4 +49,4 @@ This mod is a **temporary solution**. Articulated buses are not yet a base-game 
 
 What changes when the mod is removed: any articulated bus in your city will remain intact - except for the bending. New buses will not spawn a trailer. The **bus asset keeps working** as an ordinary single-section bus — it stays on its line, carries passengers, and behaves normally.
 
-*Final note: this mod was created with some help of coding-agents*
+-- Final note: this mod was created with some help of coding-agents

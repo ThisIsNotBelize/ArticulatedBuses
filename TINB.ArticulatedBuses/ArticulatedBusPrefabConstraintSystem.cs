@@ -159,16 +159,16 @@ namespace TINB.ArticulatedBuses
             /* When assembled straight, the trailer origin sits at (front attach - trailer attach) relative to the
                front, so shift the trailer's z-bounds by that offset and union with the front's z-bounds */
             float trailerOffsetZ = tractorData.m_AttachPosition.z - trailerData.m_AttachPosition.z;
-            float combinedMinZ = math.min(frontGeometry.m_Bounds.min.z, trailerOffsetZ + trailerGeometry.m_Bounds.min.z);
-            float combinedMaxZ = math.max(frontGeometry.m_Bounds.max.z, trailerOffsetZ + trailerGeometry.m_Bounds.max.z);
-
-            float currentLength = frontGeometry.m_Bounds.max.z - frontGeometry.m_Bounds.min.z;
-            float combinedLength = combinedMaxZ - combinedMinZ;
-            if (combinedLength <= currentLength)
+            if (!ArticulatedBusGeometry.TryComputeInflatedBoundsZ(
+                    frontGeometry.m_Bounds.min.z, frontGeometry.m_Bounds.max.z,
+                    trailerGeometry.m_Bounds.min.z, trailerGeometry.m_Bounds.max.z,
+                    trailerOffsetZ,
+                    out float combinedMinZ, out float combinedMaxZ, out float combinedLength))
             {
                 return; // front bounds already span the whole bus (or unexpected geometry) -> nothing to do
             }
 
+            float currentLength = frontGeometry.m_Bounds.max.z - frontGeometry.m_Bounds.min.z;
             frontGeometry.m_Bounds.min.z = combinedMinZ;
             frontGeometry.m_Bounds.max.z = combinedMaxZ;
             frontGeometry.m_Size.z = combinedLength;
