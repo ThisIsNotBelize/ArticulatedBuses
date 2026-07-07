@@ -1,0 +1,11 @@
+{
+  "$title": "Articulated Buses",
+  "$tab.Main": "General",
+  "$group.Diagnostics": "Diagnóstico",
+  "$group.PreRemoval": "Limpieza previa a la retirada del mod",
+  "DiagnosticLogging": "Registro de diagnóstico",
+  "DiagnosticLogging.desc": "Escribe registros de diagnóstico detallados en el registro del desarrollador (TINB.ArticulatedBuses.log). Desactivado de forma predeterminada; actívalo para ayudar a diagnosticar un problema o informar de un error.",
+  "RemoveAllArticulatedBuses": "Eliminar todos los autobuses articulados",
+  "RemoveAllArticulatedBuses.desc": "Si piensas quitar el mod: elimina todos los autobuses articulados (tractor y remolque) de la ciudad para que antes puedas crear una partida guardada totalmente limpia. Las partidas funcionan igualmente sin el mod. Esto es solo una precaución para ir sobre seguro al 100 %. Las líneas y cocheras se conservan y enviarán autobuses nuevos. También puede usarse en cualquier momento para sanear una partida existente.",
+  "RemoveAllArticulatedBuses.warn": "¿Eliminar TODOS los autobuses articulados de la ciudad?"
+}

@@ -1,0 +1,11 @@
+{
+  "$title": "Articulated Buses",
+  "$tab.Main": "Allgemein",
+  "$group.Diagnostics": "Diagnose",
+  "$group.PreRemoval": "Aufräumen vor Mod-Entfernung",
+  "DiagnosticLogging": "Diagnose-Logging",
+  "DiagnosticLogging.desc": "Schreibt detaillierte Diagnoseinformationen in das Entwicklerlog (TINB.ArticulatedBuses.log). Standardmäßig deaktiviert; aktiviere es, um ein Problem zu untersuchen oder einen detaillierten Fehlerbericht zu erstellen.",
+  "RemoveAllArticulatedBuses": "Alle Gelenkbusse entfernen",
+  "RemoveAllArticulatedBuses.desc": "Nutze diese Option wenn Du das Mod entfernen möchtest: Entfernt alle Gelenkbusse (Vorderwagen und Anhänger) aus der Stadt, um einen sauberen Spielstand anlegen zu können. Spielstände funktionieren auch ohne das Mod. Dies ist lediglich eine Vorsichtsmaßnahme, um zu 110 % sicherzugehen. Linien und Depots bleiben erhalten und schicken neue Busse los. Kann jederzeit auch zum Aufräumen eines bestehenden Spielstands genutzt werden.",
+  "RemoveAllArticulatedBuses.warn": "ALLE Gelenkbusse aus der Stadt entfernen?"
+}

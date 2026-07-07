@@ -1,0 +1,11 @@
+{
+  "$title": "Articulated Buses",
+  "$tab.Main": "Main",
+  "$group.Diagnostics": "Diagnostics",
+  "$group.PreRemoval": "Mod pre-removal cleanup",
+  "DiagnosticLogging": "Diagnostic logging",
+  "DiagnosticLogging.desc": "Write detailed diagnostic logs to the developer log (TINB.ArticulatedBuses.log). Off by default; turn it on to help diagnose a problem or file a bug report.",
+  "RemoveAllArticulatedBuses": "Remove all articulated buses",
+  "RemoveAllArticulatedBuses.desc": "Use this option if you plan to remove the mod: removes every articulated bus (front and trailer) from the city, so you can make a fully clean save beforehand. Saves work fine without the mod anyway. This is simply a precaution to be 100% on the safe side. Transport lines and depots are kept and will send out new buses. Can also be used to tidy up an existing save at any time.",
+  "RemoveAllArticulatedBuses.warn": "Remove ALL articulated buses from the city? Transport lines and depots are kept."
+}

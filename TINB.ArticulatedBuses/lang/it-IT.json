@@ -1,0 +1,11 @@
+{
+  "$title": "Articulated Buses",
+  "$tab.Main": "Generale",
+  "$group.Diagnostics": "Diagnostica",
+  "$group.PreRemoval": "Pulizia prima della rimozione della mod",
+  "DiagnosticLogging": "Registro di diagnostica",
+  "DiagnosticLogging.desc": "Scrive registri di diagnostica dettagliati nel registro dello sviluppatore (TINB.ArticulatedBuses.log). Disattivato per impostazione predefinita; attivalo per aiutare a diagnosticare un problema o segnalare un bug.",
+  "RemoveAllArticulatedBuses": "Rimuovi tutti gli autobus articolati",
+  "RemoveAllArticulatedBuses.desc": "Rilevante solo se intendi rimuovere la mod: rimuove tutti gli autobus articolati (motrice e rimorchio) dalla città, così da poter creare prima un salvataggio completamente pulito. I salvataggi funzionano comunque senza la mod. È solo una precauzione per essere sicuri al 100%. Le linee e i depositi restano e invieranno nuovi autobus. Può essere usata in qualsiasi momento anche per ripulire un salvataggio esistente.",
+  "RemoveAllArticulatedBuses.warn": "Rimuovere TUTTI gli autobus articolati dalla città? Le linee e i depositi restano."
+}

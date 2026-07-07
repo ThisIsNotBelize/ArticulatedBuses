@@ -29,10 +29,15 @@ namespace TINB.ArticulatedBuses
            per submesh (0 = bones not typed VehicleConnection). Rate-limited: the peak articulation angle */
         private readonly HashSet<Entity> m_LoggedRigSummary = new HashSet<Entity>();
         private readonly Dictionary<Entity, float> m_MaxLoggedSolveAngleDegrees = new Dictionary<Entity, float>();
+        private readonly List<Entity> m_PruneScratch = new List<Entity>();
 
         /* Only re-log the solve line once the peak articulation grows by this many degrees, so a turning bus
            logs a handful of times instead of once per ~degree */
         private const float SolveLogAngleStepDegrees = 20f;
+
+        /* Prune diagnostics entries of deleted buses this often (the sets only grow with diagnostics on) */
+        private const int PruneIntervalFrames = 4096;
+        private int m_PruneCountdown = PruneIntervalFrames;
 
         /* Caches the vanilla systems we read: prefab names, culling data, skeleton heap */
         protected override void OnCreate()
@@ -68,6 +73,46 @@ namespace TINB.ArticulatedBuses
 
                 UpdateLayoutConnectionBones(entityManager, entry.m_Entity, diagnosticLogging);
             }
+
+            if (--m_PruneCountdown <= 0)
+            {
+                m_PruneCountdown = PruneIntervalFrames;
+                PruneDeadEntries(entityManager);
+            }
+        }
+
+        /* Drops diagnostics state for buses that no longer exist */
+        private void PruneDeadEntries(EntityManager entityManager)
+        {
+            if (m_LoggedRigSummary.Count == 0 && m_MaxLoggedSolveAngleDegrees.Count == 0)
+            {
+                return;
+            }
+
+            m_PruneScratch.Clear();
+            foreach (Entity entity in m_LoggedRigSummary)
+            {
+                if (!entityManager.Exists(entity))
+                {
+                    m_PruneScratch.Add(entity);
+                }
+            }
+
+            foreach (Entity entity in m_MaxLoggedSolveAngleDegrees.Keys)
+            {
+                if (!entityManager.Exists(entity))
+                {
+                    m_PruneScratch.Add(entity);
+                }
+            }
+
+            for (int i = 0; i < m_PruneScratch.Count; i++)
+            {
+                m_LoggedRigSummary.Remove(m_PruneScratch[i]);
+                m_MaxLoggedSolveAngleDegrees.Remove(m_PruneScratch[i]);
+            }
+
+            m_PruneScratch.Clear();
         }
 
         /* Validates that root is one of our articulated buses, then drives the connection bones of every section

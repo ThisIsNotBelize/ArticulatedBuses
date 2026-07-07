@@ -1,52 +1,74 @@
-
 ## About this mod
-
-The base game has no built-in support for **articulated (bendy) buses** (yet). This mod is a **temporary workaround** that fills that gap.
-
-You don't need to configure anything to *use* an articulated bus asset that already ships set up for this mod — just subscribe to the asset, subscribe to this mod (if not automatically done).
+The base game currently has no built-in support for **articulated buses**. This mod provides a **temporary workaround**.
+Players do not need to configure anything. Subscribe to an articulated bus asset that is requires this mod, that's it.
 
 ## How-to for creators
+This mod is designed to be as update-safe as possible if native articulated-bus support is added later.
 
-First of all: this mod is designed to be as update-safe regarding a possible future implementaion of actual mechanics in the base game by the game devs, as possible.
-That means, it does not save anything in the prefabs / saves that would break a) either assets relying on the mod nor b) save-games.
-The mod works at the rather cosmetic /render level. It applies its render-logic on top any car prefab defined as bus, that carries a car tractor component.
+- No custom data is stored in prefabs or save games.
+- Assets and saves remain usable without the mod.
+- The mod works mainly on a cosmetic/rendering level.
+- It applies its logic to any **bus-type car prefab** with a **Car Tractor** component.
 
+### What this mod does
+- Extends the game's existing car/truck trailer logic to buses.
+- Enables trailers for public-transport bus prefabs with a **Car Tractor** component.
+- Uses parts of the train/tram connection logic for walkways and bellows.
+- Supports multiple **Vehicle Connection** bones for smoother accordion-style bending.
 
-**What this mod does**
-It relies on already existing vanilla mechanics of the game and expands the code used for trucks/trailers towards buses (otherwise currently the game ignores trailers attached to bus, i.e. public transport type bus car prefabs with car tractor components).
-To allow for proper walkways/bellows some of the train/tram mechanics are applied on top - plus additional support for multiple vehicle connection bones to allow for "accordion-like" inter-section bending.
+### 1. Preface
+Use two separate models and prefabs **Bus front** and **Trailer**
+Import both as vanilla-compatible `.fbx` files with axis orientation: **-Z Forward, Y Up**.
 
-**1. Front section — the main bus**
-- Import your main bus front just like any other bus. Add the **Car Tractor** component to attach the back as trailer. In the settings, set the **Fixed Trailer** to your rear trailer asset and set the **Trailer Type** to **Fixed**.
+### 2. Bone setup and rigging
+Rig the bending vertices to one or more **Vehicle Connection** bones.
 
-**2. Rear section — the trailer**
-- Import as **Car Trailer Prefab** and set its **Trailer Type** to **Fixed**.
-- **Important**: Leave its *Fixed Tractor* field empty — do *not* link it back to the front. Linking both directions in the saved asset makes the game crash when a save is loaded. The mod re-creates that back-link automatically while it's running, so you never set it by hand.
+For a simple joint:
+- Use one **Vehicle Connection** bone.
+- This is fully sufficient and works similarly to trains and trams.
+- Recommended for LOD1 and LOD2.
 
-**3. Vehicle connection / bone setup**
-- It works like a train/tram coupling. For the bending joint, this mod borrows the game's existing **train/tram vehicle-connection** logic: rig the vertices to be transformed as **Vehicle Connection** bone(s).
-- Unlike trains/trams, you can use several connection bones for a smooth accordion. Build a *chain* of connection bones as a parent hierarchy running from the body toward the gap:
+For smoother accordion bending:
+- Use a parented chain of connection bones.
+- Run the chain from the body toward the gap.
+- Set every connection bone to **Vehicle Connection** in the editor.
 
-`root bone → first connection bone → second connection bone → … → last bone (the connection point)`
+Chain example: root bone → connection bone → connection bone → … → final connection bone
 
-Each connection bone is parented to the previous one. The **last bone sits at the gap** where it meets the other section and acts as the actual connection point. In the editor select **Vehicle Connection** for all connection bones. The mod spreads the bend evenly across the chain, so more bones = smoother connection bending.
-- **Note:** A single connection bone is absolutely sufficient, bone hierarchy chains are optional — one Vehicle Connection bone gives a fully working articulated joint just as for trains and trams. Especially for LOD1 and LOD2 a single bone will be sufficient.
+Additional setup notes:
+- The final connection bone sits at the gap between both sections. It acts as the actual connection point.
+- The mod distributes the bend across the chain. More bones create smoother bending.
+- All bones must be oriented -Z Forward (as the prefab models).
 
+### 3. Front section: main bus
+Import the front section like a normal bus as **Car Prefab**.
+Add a **Car Tractor** component and set:
+- **Fixed Trailer**: your trailer asset
+- **Trailer Type**: **Fixed**
 
-**4. Colour properties**
-- To make the trailer follow the front's livery and the transport-line colour, add a Color Properties component to the trailer as well and configure it the same way as for the bus front. The mod then matches the trailer's colours and per-vehicle shade to the front automatically, and follows any repaint a user makes on the bus front (in case a user selects a custom colour on the trailer only, the front will not follow).
-- If a trailer has no Color Properties component or is not set to "Brand" the trailer will just carry its own colours.
+### 4. Rear section: trailer
+Import the rear section as a **Car Trailer Prefab** and set:
+- **Trailer Type**: **Fixed**
+- **Fixed Tractor**: leave empty
 
-**Bonus: Asset Icon Creator support**
-In case you should be using the great [Asset Icon Creator by TDW](https://mods.paradoxplaza.com/mods/105288/Windows): the mod hooks into the snapshot tool and automatically spawns trailers for the shot.
-This way you can easily create a proper icon for the entire bus front with trailer combination.
+**Do not** link the trailer back to the front manually (a two-way prefab link crashes the game when a save is loaded).
+**Do not** try to reuse trailer prefabs for multiple bus fronts. Trailers should be unique trailer per front section (won't break anything, but leads to only one bus with a working trailer due to game limitations. Incorrect setups are logged with both front prefab names `…/Cities Skylines II/Logs/TINB.ArticulatedBuses.session.log`.
+
+### 5. Colour properties
+To make the trailer follow the front section's livery and transport-line colour add a **Color Properties** component to the trailer. Configure it like the bus front. Set it to "Brand".
+The mod then matches trailer colour, per-vehicle shade and repaint changes made to the front section automatically.
+
+### Bonus: Asset Icon Creator support
+When using [Asset Icon Creator by TDW](https://mods.paradoxplaza.com/mods/105288/Windows), the mod automatically spawns trailers for snapshots. This allows icons to show the full articulated bus (in rare cases this may not work - then just reload the asset in the editor and try again).
 
 ## Disclaimer
+* This mod is a **temporary solution**. Once the game adds native articulated-bus support, this mod will become obsolete and **deprecated**.
+* **Removing this mod will not break save games.** The mod stores no custom save data and only uses vanilla game data.
+* Not required, but recommended before removal:
+	> 1. Load your save game.
+	> 2. Open the mod options.
+	> 3. Run the pre-removal clean-up.
+	> 4. Save the clean save game.
+	> 5. Remove the mod.
 
-This mod is a **temporary solution**. Articulated buses are not yet a base-game feature, and this mod works around that gap. Once the game adds native articulated-bus support, this mod will become obsolete and **deprecated**.
-
-**Removing this mod will not break your save games.** The mod stores no custom save data — it only uses vanilla game data — so a save made with the mod will load fine without it.
-
-What changes when the mod is removed: any articulated bus in your city will remain intact - except for the bending. New buses will not spawn a trailer. The **bus asset keeps working** as an ordinary single-section bus — it stays on its line, carries passengers, and behaves normally.
-
--- Final note: this mod was created with some help of coding-agents
+Final note: this mod was created with some help from coding agents.

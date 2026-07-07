@@ -149,6 +149,31 @@ namespace TINB.ArticulatedBuses
             ObjectData trailerObjectData = entityManager.GetComponentData<ObjectData>(trailerPrefab);
             Entity trailer = CreateEntity(entityManager, trailerObjectData.m_Archetype);
 
+            /* From here on the trailer entity exists but isn't in the front's layout yet. If anything below throws,
+               a bare return would leave a ghost: its Controller points at a LIVE front, so the orphan cleanup (which
+               keys on a dead controller) would never touch it. Mark it Deleted instead and report no spawn. */
+            try
+            {
+                FinishTrailerSetup(entityManager, bus, trailer, trailerPrefab, tractorData, trailerData);
+            }
+            catch (System.Exception ex)
+            {
+                entityManager.AddComponent<Deleted>(trailer);
+                SessionLog.Exception($"{nameof(ArticulatedBusTrailerSpawnSystem)}.{nameof(TrySpawnTrailer)}", ex);
+                return Entity.Null;
+            }
+
+            if (diagnosticLogging)
+            {
+                Mod.Log.InfoFormat("Spawned articulated bus trailer {0} from prefab {1} for bus {2}", trailer, trailerPrefab, bus);
+            }
+
+            return trailer;
+        }
+
+        /* Positions, links and flags the freshly created trailer; split out so a failure can atomically delete it */
+        private static void FinishTrailerSetup(EntityManager entityManager, Entity bus, Entity trailer, Entity trailerPrefab, CarTractorData tractorData, CarTrailerData trailerData)
+        {
             ObjectTransform transform = entityManager.GetComponentData<ObjectTransform>(bus);
             ObjectTransform trailerTransform = transform;
             trailerTransform.m_Position += ArticulatedBusGeometry.ComputeTrailerOffset(
@@ -190,13 +215,6 @@ namespace TINB.ArticulatedBuses
                restructured front and archetype-created trailer only show colour transiently on hover */
             entityManager.AddComponent<BatchesUpdated>(bus);
             entityManager.AddComponent<BatchesUpdated>(trailer);
-
-            if (diagnosticLogging)
-            {
-                Mod.Log.InfoFormat("Spawned articulated bus trailer {0} from prefab {1} for bus {2}", trailer, trailerPrefab, bus);
-            }
-
-            return trailer;
         }
 
         /* Creates an entity from the archetype via the cached CreateEntity(EntityArchetype) */

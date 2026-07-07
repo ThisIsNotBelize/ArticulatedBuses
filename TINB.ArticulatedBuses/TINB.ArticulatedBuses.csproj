@@ -45,7 +45,7 @@
 
   <PropertyGroup>
     <ModId>148570</ModId>
-    <Version>1.0.3</Version>
+    <Version>1.0.4</Version>
     <GameVersion>1.6.*</GameVersion>
     <ThumbnailPath>Properties/Thumbnail.png</ThumbnailPath>
     <DisplayName>Articulated Buses</DisplayName>
@@ -88,6 +88,14 @@
       <HintPath>$(Cities2ManagedDir)\Colossal.Logging.dll</HintPath>
       <Private>false</Private>
     </Reference>
+    <Reference Include="Colossal.Localization">
+      <HintPath>$(Cities2ManagedDir)\Colossal.Localization.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="Newtonsoft.Json">
+      <HintPath>$(Cities2ManagedDir)\Newtonsoft.Json.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
     <Reference Include="Colossal.Mathematics">
       <HintPath>$(Cities2ManagedDir)\Colossal.Mathematics.dll</HintPath>
       <Private>false</Private>
@@ -115,6 +123,14 @@
   </ItemGroup>
 
   <ItemGroup>
+    <!-- Per-locale settings translations (lang/<locale>.json), copied next to the DLL and read at runtime by
+         SettingsLocaleLoader. Translators edit only these files; no code or rebuild needed to add a language. -->
+    <Content Include="lang\**">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+  </ItemGroup>
+
+  <ItemGroup>
     <EmbeddedResource Include="changelog.md" Condition="Exists('changelog.md')" />
     <None Include="$(ModPropsFile)" Link="Properties\Mod.props" Condition="'$(ModPropsFile)' != '' and Exists('$(ModPropsFile)')" />
     <None Include="$(ModTargetsFile)" Link="Properties\Mod.targets" Condition="'$(ModTargetsFile)' != '' and Exists('$(ModTargetsFile)')" />
@@ -130,6 +146,13 @@
     <Message Text="Deployed $(AssemblyName) to $(DeployDir)" Importance="high" />
   </Target>
 
+  <Target Name="DeployLangFiles" AfterTargets="Build" Condition="'$(DeployLocalMod)' == 'true' and '$(DeployDir)' != '' and Exists('$(MSBuildProjectDirectory)\lang')">
+    <ItemGroup>
+      <LangDeployFiles Include="$(MSBuildProjectDirectory)\lang\**\*" />
+    </ItemGroup>
+    <Copy SourceFiles="@(LangDeployFiles)" DestinationFolder="$(DeployDir)\lang\%(RecursiveDir)" SkipUnchangedFiles="true" />
+  </Target>
+
   <Target Name="CustomModPostProcessorConfig" AfterTargets="ModPostProcessorConfig" Condition="'$(ModTargetsFile)' != ''">
     <PropertyGroup>
       <!-- Build only the Windows Burst target (CleanNonWindowsArtifacts removes any mac/Linux output),
@@ -139,6 +162,27 @@
            separately by StripReleaseSymbolsFromPublishContent. -->
       <ModPostProcessorArgs>"$(ModPostProcessorFullPath)" PostProcess "$(TargetPath)" -u "$(UnityModProjectFullPath)" @(ReferencePath->'-r &quot;%(Identity)&quot;', ' ') -p Windows -d -v</ModPostProcessorArgs>
     </PropertyGroup>
+  </Target>
+
+  <!-- Single source of truth for the creator-facing texts: edit ONLY LongDescription.md and changelog.md.
+       README.md is regenerated from LongDescription.md on every build (no-op when unchanged), and the
+       PublishConfiguration <LongDescription>/<ChangeLog> are regenerated from the two .md files just before
+       the ModPublisher reads the XML, so the three copies can never drift again. -->
+  <Target Name="SyncReadmeFromLongDescription" AfterTargets="Build" Condition="Exists('$(MSBuildProjectDirectory)\LongDescription.md')">
+    <Copy SourceFiles="$(MSBuildProjectDirectory)\LongDescription.md"
+          DestinationFiles="$(MSBuildProjectDirectory)\README.md"
+          SkipUnchangedFiles="true" />
+  </Target>
+
+  <Target Name="SyncPublishTexts" BeforeTargets="ModPublisherConfig">
+    <PropertyGroup>
+      <SyncPublishXmlPath Condition="'$(SyncPublishXmlPath)' == ''">$(MSBuildProjectDirectory)\Properties\PublishConfiguration.xml</SyncPublishXmlPath>
+      <SyncLongDescription>$([System.IO.File]::ReadAllText('$(MSBuildProjectDirectory)\LongDescription.md'))</SyncLongDescription>
+      <SyncChangeLog>$([System.IO.File]::ReadAllText('$(MSBuildProjectDirectory)\changelog.md'))</SyncChangeLog>
+    </PropertyGroup>
+    <XmlPoke XmlInputPath="$(SyncPublishXmlPath)" Query="/Publish/LongDescription" Value="$(SyncLongDescription)" />
+    <XmlPoke XmlInputPath="$(SyncPublishXmlPath)" Query="/Publish/ChangeLog" Value="$(SyncChangeLog)" />
+    <Message Text="Synced PublishConfiguration LongDescription + ChangeLog from LongDescription.md / changelog.md" Importance="high" />
   </Target>
 
   <Target Name="CleanNonWindowsArtifacts" AfterTargets="Build">

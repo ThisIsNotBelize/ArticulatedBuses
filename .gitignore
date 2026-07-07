@@ -1,15 +1,17 @@
+# Whitelist model: ignore everything in the repo root, then re-include only what belongs.
+# This keeps all local-only material (docs, decompiled source, graphics, logs, IDE and tool
+# folders) out of the repo without having to name each one.
+/*
+
+# Re-include the project itself:
+!/.gitignore
+!/TINB.ArticulatedBuses.sln
+!/TINB.ArticulatedBuses/
+!/TINB.ArticulatedBuses.Tests/
+
+# Build output, caches and IDE user files inside the projects:
 bin/
 obj/
+Library/
 *.user
 *.suo
-.vs/
-
-# Unity-generated mod cache
-Library/
-
-# Decompiled game source — large external reference, regenerable, not part of the mod
-_SourceReference/
-
-# Collected player/mod logs from bug reporters (by date + forum username) — may contain
-# machine paths / usernames; not part of the mod
-_UserLogs/

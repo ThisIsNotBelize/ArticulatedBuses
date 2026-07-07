@@ -33,6 +33,12 @@ namespace TINB.ArticulatedBuses
 
         private readonly Dictionary<Entity, FrontColorState> m_LastSyncedFront = new Dictionary<Entity, FrontColorState>();
         private readonly Dictionary<Entity, bool> m_TrailerPrefabIsBrand = new Dictionary<Entity, bool>();
+        /* Scratch list for pruning, reused to avoid per-prune allocations */
+        private readonly List<Entity> m_PruneScratch = new List<Entity>();
+
+        /* Prune dead bus entries this often, so the per-front dictionary can't grow forever in a long session */
+        private const int PruneIntervalFrames = 4096;
+        private int m_PruneCountdown = PruneIntervalFrames;
 
         private EntityQuery m_BusQuery;
         private EndFrameBarrier m_Barrier = null!;
@@ -87,6 +93,32 @@ namespace TINB.ArticulatedBuses
             {
                 roots.Dispose();
             }
+
+            if (--m_PruneCountdown <= 0)
+            {
+                m_PruneCountdown = PruneIntervalFrames;
+                PruneDeadEntries(entityManager);
+            }
+        }
+
+        /* Drops per-front state for buses that no longer exist (the prefab-keyed cache is bounded and stays) */
+        private void PruneDeadEntries(EntityManager entityManager)
+        {
+            m_PruneScratch.Clear();
+            foreach (Entity front in m_LastSyncedFront.Keys)
+            {
+                if (!entityManager.Exists(front))
+                {
+                    m_PruneScratch.Add(front);
+                }
+            }
+
+            for (int i = 0; i < m_PruneScratch.Count; i++)
+            {
+                m_LastSyncedFront.Remove(m_PruneScratch[i]);
+            }
+
+            m_PruneScratch.Clear();
         }
 
         /* Pushes the front's colour to each Brand-sourced trailer, but only when the front changed since the

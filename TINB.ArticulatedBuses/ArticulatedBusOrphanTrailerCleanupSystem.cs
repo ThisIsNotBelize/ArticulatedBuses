@@ -47,7 +47,7 @@ namespace TINB.ArticulatedBuses
         }
 
         /* Deletes each orphaned articulated-bus trailer (front gone). Uses direct EntityManager structural
-           changes — the EndFrameBarrier rejects CreateCommandBuffer outside its own late window.  */
+           changes — the EndFrameBarrier rejects CreateCommandBuffer outside its own late window. */
         protected override void OnUpdate()
         {
             if (!Mod.ShouldRunRuntimeSystems())

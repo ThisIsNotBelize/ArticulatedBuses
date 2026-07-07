@@ -1,0 +1,11 @@
+{
+  "$title": "Articulated Buses",
+  "$tab.Main": "Général",
+  "$group.Diagnostics": "Diagnostics",
+  "$group.PreRemoval": "Nettoyage avant retrait du mod",
+  "DiagnosticLogging": "Journalisation de diagnostic",
+  "DiagnosticLogging.desc": "Écrit des journaux de diagnostic détaillés dans le journal du développeur (TINB.ArticulatedBuses.log). Désactivé par défaut ; activez-le pour aider à diagnostiquer un problème ou signaler un bogue.",
+  "RemoveAllArticulatedBuses": "Supprimer tous les bus articulés",
+  "RemoveAllArticulatedBuses.desc": "Utile uniquement si vous prévoyez de retirer le mod : supprime tous les bus articulés (avant et remorque) de la ville, afin de créer au préalable une sauvegarde parfaitement propre. Les sauvegardes fonctionnent de toute façon sans le mod. C'est simplement une précaution pour être sûr à 100 %. Les lignes et dépôts sont conservés et enverront de nouveaux bus. Peut aussi servir à nettoyer une sauvegarde existante à tout moment.",
+  "RemoveAllArticulatedBuses.warn": "Supprimer TOUS les bus articulés de la ville ? Les lignes et dépôts sont conservés."
+}
