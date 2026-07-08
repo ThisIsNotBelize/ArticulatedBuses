@@ -5,6 +5,7 @@
 
 # Re-include the project itself:
 !/.gitignore
+!/README.md
 !/TINB.ArticulatedBuses.sln
 !/TINB.ArticulatedBuses/
 !/TINB.ArticulatedBuses.Tests/
