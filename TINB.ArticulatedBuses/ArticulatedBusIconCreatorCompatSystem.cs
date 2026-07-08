@@ -4,7 +4,6 @@ using System.Reflection;
 using Game;
 using Game.Common;
 using Game.Prefabs;
-using Game.SceneFlow;
 using Game.Tools;
 using Game.Vehicles;
 using Unity.Collections;
@@ -14,36 +13,70 @@ using VehiclePublicTransport = Game.Vehicles.PublicTransport;
 
 namespace TINB.ArticulatedBuses
 {
-    /* Compatibility with the "Asset Icon Creator" mod: while AIC is capturing, temporarily spawn the trailer so the
-       icon shows the whole bus, then remove just the trailer once the capture settles, leaving the front in place. */
+    /// <summary>
+    /// Create compatibility with the "Asset Icon Creator" mod
+    /// </summary>
+    /// <remarks>
+    /// While AIC is capturing, temporarily spawn the trailer then remove it again
+    /// </remarks>
     public sealed partial class ArticulatedBusIconCreatorCompatSystem : GameSystemBase
     {
         private const string IconCreatorToolTypeName = "AssetIconCreator.AssetSetupToolSystem";
 
-        /* Frames to wait after the capture closes before teardown, so AIC's graphics restore has settled */
+        /// <summary>
+        /// Frames to wait after the capture closes before teardown
+        /// </summary>
+        /// <remarks>
+        /// So AIC's graphics restore has settled
+        /// </remarks>
         private const int TeardownDelayFrames = 120;
 
-        /* How often (in editor frames) to re-scan for the AIC assembly until found (it can load after our first
-           editor frame, so a one-shot scan would miss it) */
+        /// <summary>
+        /// How often to re-scan for the AIC assembly until found
+        /// </summary>
+        /// <remarks>
+        /// Measured in editor frames. It can load after our first editor frame, so a one-shot scan would miss it
+        /// </remarks>
         private const int TypeScanIntervalFrames = 30;
 
         private EntityQuery m_BusQuery;
 
-        /* Reflection handles into the optional AIC mod; if it is absent m_AicToolType stays null and we no-op */
+        /// <summary>
+        /// Reflection handles into the optional AIC mod
+        /// </summary>
+        /// <remarks>
+        /// If it is absent m_AicToolType stays null and we no-op
+        /// </remarks>
         private int m_TypeScanCooldown;
         private Type? m_AicToolType;
         private PropertyInfo? m_ScreenshotUtilityProp;
         private ComponentSystemBase? m_AicTool;
         private PropertyInfo? m_SettingUpProp;
 
-        /* Front bus -> trailer we spawned, so teardown removes exactly what we created */
+        /// <summary>
+        /// Front bus to trailer we spawned
+        /// </summary>
+        /// <remarks>
+        /// So teardown removes exactly what we created
+        /// </remarks>
         private readonly Dictionary<Entity, Entity> m_SpawnedTrailers = new Dictionary<Entity, Entity>();
-        /* Fronts we've already logged a spawn failure for this capture, so the breadcrumb fires once, not per frame */
+
+        /// <summary>
+        /// Fronts we've already logged a spawn failure for this capture
+        /// </summary>
+        /// <remarks>
+        /// So the breadcrumb fires once, not per frame
+        /// </remarks>
         private readonly HashSet<Entity> m_SpawnFailureLogged = new HashSet<Entity>();
         private bool m_WasCapturing;
-        private int m_TeardownCountdown = -1; // < 0 = idle; counts down to 0 then tears down
+        private int m_TeardownCountdown = -1; // < 0 = idle, counts down to 0 then tears down
 
-        /* Query: AIC's photo-instance bus front (same as the in-game spawner, minus the one-shot Created tag) */
+        /// <summary>
+        /// Query AIC's photo-instance bus fronts
+        /// </summary>
+        /// <remarks>
+        /// Same as the in-game spawner but without the one-shot Created tag
+        /// </remarks>
         protected override void OnCreate()
         {
             base.OnCreate();
@@ -67,11 +100,16 @@ namespace TINB.ArticulatedBuses
             });
         }
 
-        /* Editor only: spawns the trailer while AIC captures, removes it a set number of frames afterwards */
+        /// <summary>
+        /// Spawn the trailer while AIC captures, then remove it afterward
+        /// </summary>
+        /// <remarks>
+        /// Runs in the editor only. Removes it a set number of frames after the capture closes
+        /// </remarks>
         protected override void OnUpdate()
         {
-            // editor only; in real gameplay the in-game spawner handles trailers
-            if (GameManager.instance == null || !GameManager.instance.gameMode.IsEditor())
+            // editor only, in real gameplay the in-game spawner handles trailers
+            if (!Mod.IsInEditor())
             {
                 m_WasCapturing = false;
                 m_TeardownCountdown = -1;
@@ -84,9 +122,8 @@ namespace TINB.ArticulatedBuses
             {
                 if (!m_WasCapturing)
                 {
-                    // capture just started: one breadcrumb (visible even in non-diagnostics builds) showing whether
-                    // AIC was seen and how many of our bus fronts matched the spawn query
-                    SessionLog.Event($"AIC capture started: {m_BusQuery.CalculateEntityCount()} articulated bus front(s) matched the spawn query");
+                    // capture just started; record the matched-front count to the dev log only (diagnostic detail)
+                    SessionLog.Diagnostic($"Asset Icon Creator capture started: {m_BusQuery.CalculateEntityCount()} articulated bus front(s) matched the spawn query");
                     m_SpawnFailureLogged.Clear();
                 }
 
@@ -99,8 +136,8 @@ namespace TINB.ArticulatedBuses
             }
             else if (m_WasCapturing)
             {
-                // capture ended having spawned nothing -> say so, so a missing trailer in the icon is explained
-                SessionLog.Event("AIC capture ended with no trailer spawned (no matching articulated bus front seen during capture)");
+                // capture ended having spawned nothing; dev-log only (expected when capturing a non-articulated bus)
+                SessionLog.Diagnostic("Asset Icon Creator capture ended with no trailer spawned (no matching articulated bus front seen during capture)");
             }
             else if (m_TeardownCountdown > 0 && --m_TeardownCountdown == 0)
             {
@@ -111,8 +148,13 @@ namespace TINB.ArticulatedBuses
             m_WasCapturing = capturing;
         }
 
-        /* True while AIC is setting up / taking its shot (its ScreenshotUtility.SettingUp, read by reflection);
-           resolves the AIC handles lazily and returns false (never throws) when AIC is absent or its API moved */
+        /// <summary>
+        /// Check whether AIC is currently capturing, read from its ScreenshotUtility.SettingUp by reflection
+        /// </summary>
+        /// <remarks>
+        /// Resolve the AIC handles lazily and return false, never throw, when AIC is absent or its API moved
+        /// </remarks>
+        /// <returns>True while an AIC capture is setting up; false when AIC is absent or unreadable</returns>
         private bool IsIconCreatorCapturing()
         {
             if (m_AicToolType == null || m_ScreenshotUtilityProp == null)
@@ -135,18 +177,14 @@ namespace TINB.ArticulatedBuses
 
             if (m_AicTool == null)
             {
-                // the tool system is created during editor tool init; keep retrying until it exists
+                // the tool system is created during editor tool init, keep retrying until it exists
                 m_AicTool = World.GetExistingSystemManaged(m_AicToolType);
                 if (m_AicTool == null)
                 {
                     return false;
                 }
 
-                SessionLog.Event("Asset Icon Creator detected; articulated-bus icon capture compatibility active");
-                if (Mod.IsDiagnosticLoggingEnabled())
-                {
-                    Mod.Log.Info("Asset Icon Creator detected; articulated-bus icon capture compatibility is active");
-                }
+                SessionLog.Diagnostic("Asset Icon Creator detected; articulated-bus icon capture compatibility is active");
             }
 
             try
@@ -174,7 +212,10 @@ namespace TINB.ArticulatedBuses
             }
         }
 
-        /* Finds a type by full name across all loaded assemblies, or null if none defines it */
+        /// <summary>
+        /// Find a type by full name across all loaded assemblies
+        /// </summary>
+        /// <returns>The matching type, or null if no loaded assembly defines it</returns>
         private static Type? FindLoadedType(string fullName)
         {
             foreach (Assembly assembly in AppDomain.CurrentDomain.GetAssemblies())
@@ -189,18 +230,22 @@ namespace TINB.ArticulatedBuses
                 }
                 catch
                 {
-                    // some dynamic assemblies throw on GetType; ignore and keep scanning
+                    // some dynamic assemblies throw on GetType, ignore and keep scanning
                 }
             }
 
             return null;
         }
 
-        /* Spawns (once) a trailer for each eligible bus front, recording each pair for teardown */
+        /// <summary>
+        /// Spawn a trailer once for each eligible bus front
+        /// </summary>
+        /// <remarks>
+        /// Records each front-to-trailer pair for teardown
+        /// </remarks>
         private void SpawnTrailersForCapture()
         {
             EntityManager entityManager = EntityManager;
-            bool diagnosticLogging = Mod.IsDiagnosticLoggingEnabled();
             NativeArray<Entity> buses = m_BusQuery.ToEntityArray(Allocator.Temp);
 
             try
@@ -208,26 +253,26 @@ namespace TINB.ArticulatedBuses
                 for (int i = 0; i < buses.Length; i++)
                 {
                     Entity bus = buses[i];
+
+                    // skip fronts we already trailered this capture
                     if (m_SpawnedTrailers.ContainsKey(bus))
                     {
                         continue;
                     }
 
-                    Entity trailer = ArticulatedBusTrailerSpawnSystem.TrySpawnTrailer(entityManager, bus, diagnosticLogging);
+                    // spawn and record the front-to-trailer pair
+                    Entity trailer = ArticulatedBusTrailerSpawnSystem.TrySpawnTrailer(entityManager, bus);
                     if (trailer != Entity.Null)
                     {
                         m_SpawnedTrailers[bus] = trailer;
-                        SessionLog.Event($"AIC capture: spawned trailer {trailer} for bus front {bus}");
-                        if (diagnosticLogging)
-                        {
-                            Mod.Log.InfoFormat("Asset Icon Creator capture: spawned trailer {0} for bus {1}", trailer, bus);
-                        }
+                        SessionLog.Event($"Asset Icon Creator: captured articulated bus front {bus} with its trailer");
+                        SessionLog.Diagnostic($"Asset Icon Creator capture: spawned trailer {trailer} for bus {bus}");
                     }
                     else if (m_SpawnFailureLogged.Add(bus))
                     {
-                        // matched the query but no trailer was produced -> report the exact blocker (always on, so it
-                        // shows without the diagnostics toggle), since this is the usual "just-imported asset" case
-                        SessionLog.Event($"AIC capture: trailer spawn returned null for bus front {bus} — {DescribeSpawnBlocker(entityManager, bus)}");
+                        // matched the query but produced no trailer; dev-log the exact blocker (expected for a
+                        // non-articulated bus, so keep it out of the user log)
+                        SessionLog.DiagnosticWarn($"Asset Icon Creator: no trailer spawned for bus front {bus} ({DescribeSpawnBlocker(entityManager, bus)})");
                     }
                 }
             }
@@ -237,7 +282,9 @@ namespace TINB.ArticulatedBuses
             }
         }
 
-        /* Removes the spawned trailers while keeping each front bus in place */
+        /// <summary>
+        /// Remove the spawned trailers and keep each front bus in place
+        /// </summary>
         private void RemoveCaptureTrailers()
         {
             if (m_SpawnedTrailers.Count == 0)
@@ -246,17 +293,17 @@ namespace TINB.ArticulatedBuses
             }
 
             EntityManager entityManager = EntityManager;
-            bool diagnosticLogging = Mod.IsDiagnosticLoggingEnabled();
             int removed = 0;
 
-            /* Detach the trailer but keep the front: shrink the front's LayoutElement back to [front] (a
-               buffer-content edit, not a RemoveComponent) and delete the trailer. Length <= 1 makes vanilla
-               ObjectInterpolateSystem.UpdateInterpolatedCarTrailers skip it, as for any single bus. */
+            // Shrink the front's LayoutElement buffer back to [front] and delete the trailer, keeping the front
+            // This is a buffer-content edit, not a RemoveComponent. A layout length of 1 makes vanilla
+            // ObjectInterpolateSystem.UpdateInterpolatedCarTrailers skip it, exactly as for any single bus
             foreach (KeyValuePair<Entity, Entity> pair in m_SpawnedTrailers)
             {
                 Entity bus = pair.Key;
                 Entity trailer = pair.Value;
 
+                // shrink the front's layout back to just the front
                 if (bus != Entity.Null && entityManager.Exists(bus) && !entityManager.HasComponent<Deleted>(bus) &&
                     entityManager.HasBuffer<LayoutElement>(bus))
                 {
@@ -266,6 +313,7 @@ namespace TINB.ArticulatedBuses
                     entityManager.AddComponent<BatchesUpdated>(bus);
                 }
 
+                // delete the trailer we spawned
                 if (trailer != Entity.Null && entityManager.Exists(trailer) && !entityManager.HasComponent<Deleted>(trailer))
                 {
                     entityManager.AddComponent<Deleted>(trailer);
@@ -273,16 +321,18 @@ namespace TINB.ArticulatedBuses
                 }
             }
 
-            if (diagnosticLogging)
-            {
-                Mod.Log.InfoFormat("Asset Icon Creator capture finished: removing {0} trailer(s)", removed);
-            }
+            SessionLog.Diagnostic($"Asset Icon Creator capture finished: removing {removed} trailer(s)");
 
             m_SpawnedTrailers.Clear();
         }
 
-        /* Explains why TrySpawnTrailer produced no trailer, for the always-on session log. Mirrors the spawner's own
-           precondition order, but reads only structural data (safe on the main thread) so it can run un-toggled. */
+        /// <summary>
+        /// Describe the reason a trailer spawn was blocked, for the session log
+        /// </summary>
+        /// <remarks>
+        /// Mirror the spawner's precondition order but read only structural data, so it stays safe on the main thread
+        /// </remarks>
+        /// <returns>A short human-readable reason the spawn was blocked</returns>
         private static string DescribeSpawnBlocker(EntityManager entityManager, Entity bus)
         {
             if (!entityManager.HasComponent<PrefabRef>(bus))
@@ -329,7 +379,7 @@ namespace TINB.ArticulatedBuses
                 return $"trailer prefab is already linked to a different tractor ({trailerData.m_FixedTractor})";
             }
 
-            return "preconditions look satisfied — spawn failed for another reason (enable diagnostic logging for detail)";
+            return "preconditions look satisfied, spawn failed for another reason (enable diagnostic logging for detail)";
         }
     }
 }

@@ -45,7 +45,7 @@
 
   <PropertyGroup>
     <ModId>148570</ModId>
-    <Version>1.0.4</Version>
+    <Version>1.0.5</Version>
     <GameVersion>1.6.*</GameVersion>
     <ThumbnailPath>Properties/Thumbnail.png</ThumbnailPath>
     <DisplayName>Articulated Buses</DisplayName>

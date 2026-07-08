@@ -1,6 +1,6 @@
 ## About this mod
-The base game currently has no built-in support for **articulated buses**. This mod provides a **temporary workaround**.
-Players do not need to configure anything. Subscribe to an articulated bus asset that is requires this mod, that's it.
+The base game currently has no built-in support for **articulated buses**. This mod provides a **temporary workaround** for this functionality (it does not contain any assets).
+You do not need to configure anything. Just subscribe to any articulated bus asset using this mod, that's it.
 
 ## How-to for creators
 This mod is designed to be as update-safe as possible if native articulated-bus support is added later.
@@ -33,7 +33,7 @@ For smoother accordion bending:
 - Run the chain from the body toward the gap.
 - Set every connection bone to **Vehicle Connection** in the editor.
 
-Chain example: root bone → connection bone → connection bone → … → final connection bone
+Chain example: root bone -> connection bone -> connection bone -> ... -> final connection bone
 
 Additional setup notes:
 - The final connection bone sits at the gap between both sections. It acts as the actual connection point.
@@ -52,11 +52,11 @@ Import the rear section as a **Car Trailer Prefab** and set:
 - **Fixed Tractor**: leave empty
 
 **Do not** link the trailer back to the front manually (a two-way prefab link crashes the game when a save is loaded).
-**Do not** try to reuse trailer prefabs for multiple bus fronts. Trailers should be unique trailer per front section (won't break anything, but leads to only one bus with a working trailer due to game limitations. Incorrect setups are logged with both front prefab names `…/Cities Skylines II/Logs/TINB.ArticulatedBuses.session.log`.
+**Do not** try to reuse trailer prefabs for multiple bus fronts. Trailers should be unique per front section (won't break anything, but leads to only one bus with a working trailer due to game limitations). Incorrect setups are logged with both front prefab names in `.../Cities Skylines II/Logs/TINB.ArticulatedBuses.session.log`.
 
-### 5. Colour properties
-To make the trailer follow the front section's livery and transport-line colour add a **Color Properties** component to the trailer. Configure it like the bus front. Set it to "Brand".
-The mod then matches trailer colour, per-vehicle shade and repaint changes made to the front section automatically.
+### 5. Color properties
+To make the trailer follow the front section's livery and transport-line color add a **Color Properties** component to the trailer. Configure it like the bus front. Set it to "Brand".
+The mod then matches trailer color, per-vehicle shade and repaint changes made to the front section automatically.
 
 ### Bonus: Asset Icon Creator support
 When using [Asset Icon Creator by TDW](https://mods.paradoxplaza.com/mods/105288/Windows), the mod automatically spawns trailers for snapshots. This allows icons to show the full articulated bus (in rare cases this may not work - then just reload the asset in the editor and try again).

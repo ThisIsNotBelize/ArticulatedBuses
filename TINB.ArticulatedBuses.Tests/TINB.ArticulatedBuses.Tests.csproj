@@ -5,7 +5,7 @@
          dotnet test TINB.ArticulatedBuses.Tests\TINB.ArticulatedBuses.Tests.csproj
 
        It does NOT reference the mod DLL or Game.dll. Instead it COMPILES the pure helper source file directly
-       (ArticulatedBusGeometry.cs), so the only dependency is Unity.Mathematics — the tests can never accidentally
+       (ArticulatedBusGeometryHelper.cs), so the only dependency is Unity.Mathematics, so the tests can never accidentally
        pull in the ECS / game runtime. -->
 
   <PropertyGroup>
@@ -27,7 +27,7 @@
 
   <!-- Compile the production pure-helper source directly (shared implementation, no DLL coupling). -->
   <ItemGroup>
-    <Compile Include="..\TINB.ArticulatedBuses\ArticulatedBusGeometry.cs" Link="ArticulatedBusGeometry.cs" />
+    <Compile Include="..\TINB.ArticulatedBuses\ArticulatedBusGeometryHelper.cs" Link="ArticulatedBusGeometryHelper.cs" />
   </ItemGroup>
 
   <!-- Unity.Mathematics + its load-time companions, copied locally so the test host can resolve them. -->

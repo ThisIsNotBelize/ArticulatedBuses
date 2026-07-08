@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using Colossal;
 using Colossal.Localization;
 using Game.Modding;
 using Game.SceneFlow;
@@ -8,22 +9,21 @@ using Newtonsoft.Json;
 
 namespace TINB.ArticulatedBuses
 {
-    /* Loads per-locale settings translations from a folder of JSON files and registers them with the game's
-       localization manager. One file per locale, named by its locale id (en-US.json, de-DE.json, ...). Each file is
-       a flat { "key": "value" } map using SHORT keys, which are expanded to the vanilla Options.* locale IDs through
-       the ModSetting's own helpers, so the result is always correctly-named regardless of mod id.
-
-       Dependency-free (uses only the game's bundled Newtonsoft.Json) and reusable across mods. Short-key conventions:
-         "$title"          -> the settings page title
-         "$tab.<Tab>"      -> a tab name
-         "$group.<Group>"  -> a group name
-         "<Option>"        -> an option's label
-         "<Option>.desc"   -> an option's description
-         "<Option>.warn"   -> an option's confirmation-dialog text (buttons with [SettingsUIConfirmation]) */
+    /// <summary>
+    /// Load the mod-settings translations and register them with the game
+    /// </summary>
+    /// <remarks>
+    /// Only official game locales are supported
+    /// </remarks>
     public static class SettingsLocaleLoader
     {
-        /* Registers every &lt;locale&gt;.json in langFolder. Returns the number of locale files loaded. Never throws:
-           a malformed or unreadable file is logged and skipped so one bad translation can't break mod load. */
+        /// <summary>
+        /// Load the locale JSON files from a folder
+        /// </summary>
+        /// <remarks>
+        /// Malformed files are logged
+        /// </remarks>
+        /// <returns>The number of locale sources registered</returns>
         public static int LoadFromFolder(ModSetting setting, string langFolder)
         {
             if (setting == null || string.IsNullOrEmpty(langFolder) || !Directory.Exists(langFolder))
@@ -39,31 +39,37 @@ namespace TINB.ArticulatedBuses
                 try
                 {
                     string localeId = Path.GetFileNameWithoutExtension(file);
+                    // Deserialize JSON
                     Dictionary<string, string>? raw = JsonConvert.DeserializeObject<Dictionary<string, string>>(File.ReadAllText(file));
                     if (raw == null || raw.Count == 0)
                     {
                         continue;
                     }
 
+                    // Create localised/translated settings dict
                     Dictionary<string, string> expanded = new Dictionary<string, string>(raw.Count);
                     foreach (KeyValuePair<string, string> entry in raw)
                     {
                         expanded[Expand(setting, entry.Key)] = entry.Value;
                     }
 
+                    // Register
                     localizationManager.AddSource(localeId, new LocaleFileSource(expanded));
                     registered++;
                 }
                 catch (Exception ex)
                 {
-                    Mod.Log.Warn($"Failed to load locale file {file}: {ex.Message}");
+                    Mod.Log.Warn($"Failed to load translation file {file}: {ex.Message}");
                 }
             }
 
             return registered;
         }
 
-        /* Expands a short translation key to the vanilla Options.* locale ID for this setting */
+        /// <summary>
+        /// Expand a short translation key to the vanilla Options locale ID for this setting
+        /// </summary>
+        /// <returns>The full locale ID the game expects</returns>
         private static string Expand(ModSetting setting, string key)
         {
             if (key == "$title")
@@ -92,6 +98,41 @@ namespace TINB.ArticulatedBuses
             }
 
             return setting.GetOptionLabelLocaleID(key);
+        }
+
+        /// <summary>
+        /// Generic IDictionarySource backed by a fixed key-value map
+        /// </summary>
+        /// <remarks>
+        /// Handed to the game's localization manager as one locale's translations
+        /// </remarks>
+        private sealed class LocaleFileSource : IDictionarySource
+        {
+            private readonly IReadOnlyDictionary<string, string> m_Entries;
+
+            /// <summary>
+            /// Wrap a fixed key-value map as a locale source
+            /// </summary>
+            public LocaleFileSource(IReadOnlyDictionary<string, string> entries)
+            {
+                m_Entries = entries;
+            }
+
+            /// <summary>
+            /// Return the source's translation entries
+            /// </summary>
+            /// <returns>The wrapped key-value map</returns>
+            public IEnumerable<KeyValuePair<string, string>> ReadEntries(IList<IDictionaryEntryError> errors, Dictionary<string, int> indexCounts)
+            {
+                return m_Entries;
+            }
+
+            /// <summary>
+            /// Release the source. Nothing to do for an in-memory map
+            /// </summary>
+            public void Unload()
+            {
+            }
         }
     }
 }

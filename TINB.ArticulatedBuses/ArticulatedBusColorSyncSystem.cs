@@ -11,18 +11,23 @@ using VehiclePublicTransport = Game.Vehicles.PublicTransport;
 
 namespace TINB.ArticulatedBuses
 {
-    /* Keeps the trailer's colour in sync with the front, front-authoritative:
-       - user-painted colour (CustomMeshColor): when the front's paint changes (painted or reset) it is pushed to
-         the trailer; a trailer-only edit survives until the front changes again.
-       - line colour (vanilla Brand/route path): when the front's CurrentRoute changes (e.g. a returning bus is
-         reassigned to a differently-coloured line) we flag the trailer BatchesUpdated so vanilla MeshColorSystem
-         re-resolves its line colour through the Controller->front->CurrentRoute hop. (A route's own colour being
-         edited is already handled by vanilla's ColorUpdated path, which walks LayoutElement; this covers the
-         reassignment case it misses, where the front changes route but no ColorUpdated fires.)
-       Only Brand-sourced trailers are synced (others stay independent) */
+    /// <summary>
+    /// Syncs trailer color variations to the front
+    /// </summary>
+    /// <remarks>
+    /// - user-painted color (CustomMeshColor). When the front's color changes (painted or reset) it is pushed to the
+    ///   trailer. A trailer-only edit survives until the front changes again
+    /// - line color. When the front's CurrentRoute changes we flag the trailer BatchesUpdated so MeshColorSystem
+    ///   re-resolves its line color through the front
+    /// </remarks>
     public sealed partial class ArticulatedBusColorSyncSystem : GameSystemBase
     {
-        /* Snapshot of a front's colour-relevant state, to detect changes between frames */
+        /// <summary>
+        /// Snapshot of a front's color-relevant state
+        /// </summary>
+        /// <remarks>
+        /// Used to detect changes between frames
+        /// </remarks>
         private struct FrontColorState
         {
             public bool m_HasCustom;
@@ -33,17 +38,29 @@ namespace TINB.ArticulatedBuses
 
         private readonly Dictionary<Entity, FrontColorState> m_LastSyncedFront = new Dictionary<Entity, FrontColorState>();
         private readonly Dictionary<Entity, bool> m_TrailerPrefabIsBrand = new Dictionary<Entity, bool>();
-        /* Scratch list for pruning, reused to avoid per-prune allocations */
+        /// <summary>
+        /// Scratch list for pruning
+        /// </summary>
+        /// <remarks>
+        /// Reused to avoid per-prune allocations
+        /// </remarks>
         private readonly List<Entity> m_PruneScratch = new List<Entity>();
 
-        /* Prune dead bus entries this often, so the per-front dictionary can't grow forever in a long session */
+        /// <summary>
+        /// How often to prune dead bus entries
+        /// </summary>
+        /// <remarks>
+        /// Keeps the per-front dictionary from growing forever in a long session
+        /// </remarks>
         private const int PruneIntervalFrames = 4096;
         private int m_PruneCountdown = PruneIntervalFrames;
 
         private EntityQuery m_BusQuery;
         private EndFrameBarrier m_Barrier = null!;
 
-        /* Caches the EndFrameBarrier and builds the query for articulated bus fronts (layout leads) */
+        /// <summary>
+        /// Cache the EndFrameBarrier and build the query for articulated bus fronts that lead a layout
+        /// </summary>
         protected override void OnCreate()
         {
             base.OnCreate();
@@ -70,10 +87,12 @@ namespace TINB.ArticulatedBuses
             RequireForUpdate(m_BusQuery);
         }
 
-        /* Pushes any changed front colour to its trailer(s) */
+        /// <summary>
+        /// Push any changed front color to its trailer
+        /// </summary>
         protected override void OnUpdate()
         {
-            if (!Mod.ShouldRunRuntimeSystems())
+            if (!Mod.IsInGame())
             {
                 return;
             }
@@ -101,7 +120,12 @@ namespace TINB.ArticulatedBuses
             }
         }
 
-        /* Drops per-front state for buses that no longer exist (the prefab-keyed cache is bounded and stays) */
+        /// <summary>
+        /// Drop per-front state for buses that no longer exist
+        /// </summary>
+        /// <remarks>
+        /// The prefab-keyed cache is bounded and stays
+        /// </remarks>
         private void PruneDeadEntries(EntityManager entityManager)
         {
             m_PruneScratch.Clear();
@@ -121,8 +145,9 @@ namespace TINB.ArticulatedBuses
             m_PruneScratch.Clear();
         }
 
-        /* Pushes the front's colour to each Brand-sourced trailer, but only when the front changed since the
-           last sync (so a manual trailer-only edit survives until the front is repainted/reset) */
+        /// <summary>
+        /// Push the front's color to each Brand-sourced trailer
+        /// </summary>
         private void SyncBus(EntityManager entityManager, EntityCommandBuffer commandBuffer, Entity root)
         {
             DynamicBuffer<LayoutElement> layout = entityManager.GetBuffer<LayoutElement>(root);
@@ -131,7 +156,7 @@ namespace TINB.ArticulatedBuses
                 return;
             }
 
-            /* Only our articulated buses (front prefab declares a fixed trailer) */
+            // Only our articulated buses (front prefab declares a fixed trailer)
             Entity rootPrefab = entityManager.GetComponentData<PrefabRef>(root).m_Prefab;
             if (!entityManager.HasComponent<CarTractorData>(rootPrefab) ||
                 entityManager.GetComponentData<CarTractorData>(rootPrefab).m_FixedTrailer == Entity.Null)
@@ -154,7 +179,6 @@ namespace TINB.ArticulatedBuses
                 return; // front unchanged since last sync -> leave trailer (and any manual trailer edit) alone
             }
 
-            bool diagnosticLogging = Mod.IsDiagnosticLoggingEnabled();
             for (int i = 1; i < layout.Length; i++)
             {
                 Entity trailer = layout[i].m_Vehicle;
@@ -164,10 +188,10 @@ namespace TINB.ArticulatedBuses
                 }
 
                 bool brand = TrailerIsBrand(entityManager, trailer);
-                if (diagnosticLogging)
+                if (Mod.IsDiagnosticLoggingEnabled())
                 {
                     UnityEngine.Color c = current.m_ColorSet.m_Channel0;
-                    Mod.Log.Info($"{nameof(ArticulatedBusColorSyncSystem)} diagnostics: front={root} customChanged={customChanged}, routeChanged={routeChanged}, hasCustom={current.m_HasCustom}, frontCh0=({c.r:F3},{c.g:F3},{c.b:F3}), route={current.m_Route}, trailer={trailer}, brand={brand}, trailerHadCustom={entityManager.HasComponent<CustomMeshColor>(trailer) && entityManager.IsComponentEnabled<CustomMeshColor>(trailer)}");
+                    SessionLog.Diagnostic($"{nameof(ArticulatedBusColorSyncSystem)} diagnostics: front={root} customChanged={customChanged}, routeChanged={routeChanged}, hasCustom={current.m_HasCustom}, frontCh0=({c.r:F3},{c.g:F3},{c.b:F3}), route={current.m_Route}, trailer={trailer}, brand={brand}, trailerHadCustom={entityManager.HasComponent<CustomMeshColor>(trailer) && entityManager.IsComponentEnabled<CustomMeshColor>(trailer)}");
                 }
 
                 if (!brand)
@@ -177,13 +201,13 @@ namespace TINB.ArticulatedBuses
 
                 if (customChanged)
                 {
-                    // rewrites/clears the trailer's custom override and flags BatchesUpdated
+                    // rewrite or clear the trailer's custom override and flag BatchesUpdated
                     ApplyCustomColor(entityManager, commandBuffer, trailer, current);
                 }
                 else
                 {
-                    // line colour (route) changed only: trigger a vanilla recompute so the trailer re-resolves the
-                    // front's new line colour via the Controller hop (no custom edit to push)
+                    // only the line color (route) changed, so trigger a vanilla recompute and let the trailer
+                    // re-resolve the front's new line color via the Controller hop (no custom edit to push)
                     commandBuffer.AddComponent<BatchesUpdated>(trailer);
                 }
             }
@@ -191,10 +215,16 @@ namespace TINB.ArticulatedBuses
             m_LastSyncedFront[root] = current;
         }
 
-        /* Reads a front's current colour-relevant state: its custom-paint override (if enabled), and the line
-           colour source it currently resolves to (its CurrentRoute and that route's colour). The route fields let
-           us detect a mid-return line reassignment, which changes the front's line colour without firing vanilla's
-           route-side ColorUpdated path that would otherwise refresh the trailer. */
+        /// <summary>
+        /// Read a front's current color-relevant state
+        /// </summary>
+        /// <remarks>
+        /// Reads its custom-paint override (if enabled), and the line color source it currently resolves to (its
+        /// CurrentRoute and that route's color). The route fields let us detect a mid-return line reassignment, which
+        /// changes the front's line color without firing vanilla's route-side ColorUpdated path that would otherwise
+        /// refresh the trailer
+        /// </remarks>
+        /// <returns>A snapshot of the front's custom-paint override and current line color source</returns>
         private static FrontColorState ReadFrontColor(EntityManager entityManager, Entity entity)
         {
             FrontColorState state = default(FrontColorState);
@@ -223,8 +253,13 @@ namespace TINB.ArticulatedBuses
             return state;
         }
 
-        /* Writes/enables the trailer's override when the front has one, disables it when the front is back on the
-           line colour, then forces a batch refresh */
+        /// <summary>
+        /// Apply the front's custom color to the trailer, then force a batch refresh
+        /// </summary>
+        /// <remarks>
+        /// Write and enable the trailer's override when the front has one, disable it when the front is back on the line
+        /// color
+        /// </remarks>
         private static void ApplyCustomColor(EntityManager entityManager, EntityCommandBuffer commandBuffer, Entity trailer, FrontColorState state)
         {
             if (state.m_HasCustom)
@@ -241,16 +276,22 @@ namespace TINB.ArticulatedBuses
             }
             else if (entityManager.HasComponent<CustomMeshColor>(trailer))
             {
-                // front reset to line colour -> drop the trailer's override too
+                // front reset to line color -> drop the trailer's override too
                 entityManager.SetComponentEnabled<CustomMeshColor>(trailer, false);
             }
 
-            /* Refresh via the EndFrameBarrier: adding BatchesUpdated directly here (Rendering phase) lands too
-               late and only refreshes on hover; the barrier applies it for next frame's colour + batch upload */
+            // Refresh via the EndFrameBarrier. Adding BatchesUpdated directly here (Rendering phase) lands too
+            // late and only refreshes on hover, so the barrier applies it for next frame's color and batch upload
             commandBuffer.AddComponent<BatchesUpdated>(trailer);
         }
 
-        /* True if the trailer prefab's livery is Brand-sourced (cached per prefab so the scan runs once) */
+        /// <summary>
+        /// Check whether the trailer prefab's livery is Brand-sourced
+        /// </summary>
+        /// <remarks>
+        /// Cached per prefab so the scan runs once
+        /// </remarks>
+        /// <returns>True if the trailer prefab has a Brand-sourced variation with external channels</returns>
         private bool TrailerIsBrand(EntityManager entityManager, Entity trailer)
         {
             if (!entityManager.HasComponent<PrefabRef>(trailer))
@@ -292,13 +333,22 @@ namespace TINB.ArticulatedBuses
             return isBrand;
         }
 
-        /* Compares the three colour channels of two colour sets */
+        /// <summary>
+        /// Compare the three color channels of two color sets
+        /// </summary>
+        /// <returns>True if all three channels match</returns>
         private static bool ColorSetEquals(ColorSet a, ColorSet b)
         {
             return a.m_Channel0 == b.m_Channel0 && a.m_Channel1 == b.m_Channel1 && a.m_Channel2 == b.m_Channel2;
         }
 
-        /* Compares two route colours (Color32 has no value-equality operator) */
+        /// <summary>
+        /// Compare two route colors
+        /// </summary>
+        /// <remarks>
+        /// Color32 has no value-equality operator
+        /// </remarks>
+        /// <returns>True if both colors match on all channels</returns>
         private static bool RouteColorEquals(UnityEngine.Color32 a, UnityEngine.Color32 b)
         {
             return a.r == b.r && a.g == b.g && a.b == b.b && a.a == b.a;

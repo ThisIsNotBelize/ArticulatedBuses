@@ -1,5 +1,4 @@
 using System;
-using System.Reflection;
 using Game;
 using Game.Common;
 using Game.Objects;
@@ -13,18 +12,19 @@ using VehiclePublicTransport = Game.Vehicles.PublicTransport;
 
 namespace TINB.ArticulatedBuses
 {
-    /* Spawns the rear trailer for a newly created bus front (before the vanilla vehicle InitializeSystem):
-       creates and positions the trailer, links it to the front, and flags both for a render refresh */
+    /// <summary>
+    /// Spawns trailers
+    /// </summary>
     public sealed partial class ArticulatedBusTrailerSpawnSystem : GameSystemBase
     {
-        /* Cached EntityManager.CreateEntity(EntityArchetype), invoked via reflection in CreateEntity() */
-        private static readonly MethodInfo CreateEntityFromArchetypeMethod =
-            typeof(EntityManager).GetMethod(nameof(EntityManager.CreateEntity), new[] { typeof(EntityArchetype) }) ??
-            throw new MissingMethodException(nameof(EntityManager), nameof(EntityManager.CreateEntity));
-
         private EntityQuery m_BusQuery;
 
-        /* Query: fresh public-transport bus fronts without a trailer/layout yet (and not temp/deleted) */
+        /// <summary>
+        /// Query articulated bus instances without spawned trailers
+        /// </summary>
+        /// <remarks>
+        /// Temp and Deleted instances are excluded
+        /// </remarks>
         protected override void OnCreate()
         {
             base.OnCreate();
@@ -48,13 +48,16 @@ namespace TINB.ArticulatedBuses
                 }
             });
 
+            // run OnUpdate when matching instances
             RequireForUpdate(m_BusQuery);
         }
 
-        /* Spawns a trailer for each matching bus front */
+        /// <summary>
+        /// Iterate bus fronts for spawning
+        /// </summary>
         protected override void OnUpdate()
         {
-            if (!Mod.ShouldRunRuntimeSystems())
+            if (!Mod.IsInGame())
             {
                 return;
             }
@@ -67,10 +70,9 @@ namespace TINB.ArticulatedBuses
                 for (int i = 0; i < buses.Length; i++)
                 {
                     Entity bus = buses[i];
-                    Entity trailer = TrySpawnTrailer(entityManager, bus, Mod.IsDiagnosticLoggingEnabled());
+                    Entity trailer = TrySpawnTrailer(entityManager, bus);
                     if (trailer != Entity.Null)
                     {
-                        ArticulatedBusSessionStats.TrailerSpawned();
                         SessionLog.Event($"spawned trailer {trailer} for new bus front {bus}");
                     }
                 }
@@ -85,18 +87,22 @@ namespace TINB.ArticulatedBuses
             }
         }
 
-        /* Creates and attaches the fixed trailer for a bus front; shared by the in-game and Asset Icon Creator
-           paths. Returns the trailer entity, or Entity.Null if the bus has no valid fixed trailer */
-        internal static Entity TrySpawnTrailer(EntityManager entityManager, Entity bus, bool diagnosticLogging)
+        /// <summary>
+        /// Spawn a trailer for a bus front
+        /// </summary>
+        /// <returns>The spawned trailer entity, or Entity.Null if the front is not an eligible articulated bus</returns>
+        internal static Entity TrySpawnTrailer(EntityManager entityManager, Entity bus)
         {
             PrefabRef busPrefabRef = entityManager.GetComponentData<PrefabRef>(bus);
             Entity busPrefab = busPrefabRef.m_Prefab;
 
+            // Only if car tractor component exists
             if (!entityManager.HasComponent<CarTractorData>(busPrefab))
             {
                 return Entity.Null;
             }
 
+            // Only if trailer prefab exists
             CarTractorData tractorData = entityManager.GetComponentData<CarTractorData>(busPrefab);
             Entity trailerPrefab = tractorData.m_FixedTrailer;
             if (trailerPrefab == Entity.Null)
@@ -104,57 +110,44 @@ namespace TINB.ArticulatedBuses
                 return Entity.Null;
             }
 
+            // Only fixed trailers
             if (tractorData.m_TrailerType != CarTrailerType.Fixed)
             {
-                if (diagnosticLogging)
-                {
-                    Mod.Log.WarnFormat("Bus prefab {0} has fixed trailer {1}, but tractor trailer type is {2} instead of Fixed", busPrefab, trailerPrefab, tractorData.m_TrailerType);
-                }
-
+                SessionLog.DiagnosticWarn($"Bus prefab {busPrefab} has fixed trailer {trailerPrefab}, but tractor trailer type is {tractorData.m_TrailerType} instead of Fixed");
                 return Entity.Null;
             }
 
+            // Only if trailer components exist
             if (!entityManager.HasComponent<CarTrailerData>(trailerPrefab) ||
                 !entityManager.HasComponent<ObjectData>(trailerPrefab))
             {
-                if (diagnosticLogging)
-                {
-                    Mod.Log.WarnFormat("Bus prefab {0} has fixed trailer {1}, but trailer lacks required data", busPrefab, trailerPrefab);
-                }
-
+                SessionLog.DiagnosticWarn($"Bus prefab {busPrefab} has fixed trailer {trailerPrefab}, but trailer lacks required data");
                 return Entity.Null;
             }
 
+            // Only fixed fronts
             CarTrailerData trailerData = entityManager.GetComponentData<CarTrailerData>(trailerPrefab);
             if (trailerData.m_TrailerType != CarTrailerType.Fixed)
             {
-                if (diagnosticLogging)
-                {
-                    Mod.Log.WarnFormat("Bus prefab {0} has fixed trailer {1}, but trailer type is {2} instead of Fixed", busPrefab, trailerPrefab, trailerData.m_TrailerType);
-                }
-
+                SessionLog.DiagnosticWarn($"Bus prefab {busPrefab} has fixed trailer {trailerPrefab}, but trailer type is {trailerData.m_TrailerType} instead of Fixed");
                 return Entity.Null;
             }
 
+            // Only if trailer does not point to another tractor (e.g. truck)
             if (trailerData.m_FixedTractor != Entity.Null && trailerData.m_FixedTractor != busPrefab)
             {
-                if (diagnosticLogging)
-                {
-                    Mod.Log.WarnFormat("Bus prefab {0} has fixed trailer {1}, but trailer points back to fixed tractor {2}", busPrefab, trailerPrefab, trailerData.m_FixedTractor);
-                }
-
+                SessionLog.DiagnosticWarn($"Bus prefab {busPrefab} has fixed trailer {trailerPrefab}, but trailer points back to fixed tractor {trailerData.m_FixedTractor}");
                 return Entity.Null;
             }
 
+            // create trailer
             ObjectData trailerObjectData = entityManager.GetComponentData<ObjectData>(trailerPrefab);
-            Entity trailer = CreateEntity(entityManager, trailerObjectData.m_Archetype);
+            Entity trailer = entityManager.CreateEntity(trailerObjectData.m_Archetype);
 
-            /* From here on the trailer entity exists but isn't in the front's layout yet. If anything below throws,
-               a bare return would leave a ghost: its Controller points at a LIVE front, so the orphan cleanup (which
-               keys on a dead controller) would never touch it. Mark it Deleted instead and report no spawn. */
+            // To avoid orphans, possible exceptions lead to marking Deleted flag
             try
             {
-                FinishTrailerSetup(entityManager, bus, trailer, trailerPrefab, tractorData, trailerData);
+                FinishTrailerSpawn(entityManager, bus, trailer, trailerPrefab, tractorData, trailerData);
             }
             catch (System.Exception ex)
             {
@@ -163,65 +156,63 @@ namespace TINB.ArticulatedBuses
                 return Entity.Null;
             }
 
-            if (diagnosticLogging)
-            {
-                Mod.Log.InfoFormat("Spawned articulated bus trailer {0} from prefab {1} for bus {2}", trailer, trailerPrefab, bus);
-            }
+            SessionLog.Diagnostic($"Spawned articulated bus trailer {trailer} from prefab {trailerPrefab} for bus {bus}");
 
             return trailer;
         }
 
-        /* Positions, links and flags the freshly created trailer; split out so a failure can atomically delete it */
-        private static void FinishTrailerSetup(EntityManager entityManager, Entity bus, Entity trailer, Entity trailerPrefab, CarTractorData tractorData, CarTrailerData trailerData)
+        /// <summary>
+        /// Finalize trailer spawn
+        /// </summary>
+        private static void FinishTrailerSpawn(EntityManager entityManager, Entity bus, Entity trailer, Entity trailerPrefab, CarTractorData tractorData, CarTrailerData trailerData)
         {
+            // Apply front's transform
             ObjectTransform transform = entityManager.GetComponentData<ObjectTransform>(bus);
             ObjectTransform trailerTransform = transform;
-            trailerTransform.m_Position += ArticulatedBusGeometry.ComputeTrailerOffset(
-                transform.m_Rotation, tractorData.m_AttachPosition, trailerData.m_AttachPosition);
+            trailerTransform.m_Position += ArticulatedBusGeometryHelper.ComputeTrailerOffset(transform.m_Rotation, tractorData.m_AttachPosition, trailerData.m_AttachPosition);
 
             entityManager.SetComponentData(trailer, trailerTransform);
+
+            // Apply reference and attach front controller
             entityManager.SetComponentData(trailer, new PrefabRef(trailerPrefab));
             entityManager.SetComponentData(trailer, new Controller(bus));
 
+            // Sync to front (misc)
+
+            // Seed
             if (entityManager.HasComponent<PseudoRandomSeed>(bus))
             {
-                /* Reuse the front's seed so MeshColorSystem gives the trailer the same per-vehicle colour
-                   variation (a different seed would randomise it to a different shade) */
+                // Reuse the front's seed so MeshColorSystem gives the trailer the same per-vehicle color
+                // variation (a different seed would randomize it to a different shade)
                 PseudoRandomSeed busSeed = entityManager.GetComponentData<PseudoRandomSeed>(bus);
                 entityManager.SetComponentData(trailer, busSeed);
             }
 
+            // Trip
             if (entityManager.HasComponent<TripSource>(bus))
             {
                 entityManager.AddComponentData(trailer, entityManager.GetComponentData<TripSource>(bus));
             }
 
+            // Unspawned flag
             if (entityManager.HasComponent<Unspawned>(bus))
             {
                 entityManager.AddComponent<Unspawned>(trailer);
             }
 
-            /* Get-or-add then rebuild so this works for the initial spawn (no buffer yet) AND for the migration
-               restore path, where a 1.0.1-contaminated front still carries a [front]-only LayoutElement (its
-               trailer was deleted by the old parked logic and ReferencesSystem shrank the buffer) */
+            // Get-or-add layout buffer of front bus
             DynamicBuffer<LayoutElement> layout = entityManager.HasComponent<LayoutElement>(bus)
                 ? entityManager.GetBuffer<LayoutElement>(bus)
                 : entityManager.AddBuffer<LayoutElement>(bus);
             layout.Clear();
+
+            // Add trailer to layout (buffer)
             layout.Add(new LayoutElement(bus));
             layout.Add(new LayoutElement(trailer));
 
-            /* Flag both sections so MeshColorSystem + the batch uploader (re)apply their colour; without this our
-               restructured front and archetype-created trailer only show colour transiently on hover */
+            // Flag updated for MeshColorSystem + the batch/instance uploader rendering/batching systems
             entityManager.AddComponent<BatchesUpdated>(bus);
             entityManager.AddComponent<BatchesUpdated>(trailer);
-        }
-
-        /* Creates an entity from the archetype via the cached CreateEntity(EntityArchetype) */
-        private static Entity CreateEntity(EntityManager entityManager, EntityArchetype archetype)
-        {
-            object boxedEntityManager = entityManager;
-            return (Entity)CreateEntityFromArchetypeMethod.Invoke(boxedEntityManager, new object[] { archetype });
         }
     }
 }

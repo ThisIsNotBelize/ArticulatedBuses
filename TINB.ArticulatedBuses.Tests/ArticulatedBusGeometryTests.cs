@@ -10,7 +10,7 @@ namespace TINB.ArticulatedBuses.Tests
     {
         private const float Tol = 1e-4f;
 
-        // Two rotations are equal up to sign (q and -q are the same orientation).
+        // Two rotations are equal up to sign (q and -q are the same orientation)
         private static void AssertSameRotation(quaternion expected, quaternion actual, string msg = "")
         {
             float dot = math.abs(math.dot(expected.value, actual.value));
@@ -25,7 +25,7 @@ namespace TINB.ArticulatedBuses.Tests
             float3 frontAttach = new float3(0f, 0f, 3.0f);
             float3 trailerAttach = new float3(0f, 0f, -4.0f);
 
-            float3 offset = ArticulatedBusGeometry.ComputeTrailerOffset(quaternion.identity, frontAttach, trailerAttach);
+            float3 offset = ArticulatedBusGeometryHelper.ComputeTrailerOffset(quaternion.identity, frontAttach, trailerAttach);
 
             Assert.That(offset.x, Is.EqualTo(0f).Within(Tol));
             Assert.That(offset.y, Is.EqualTo(0f).Within(Tol));
@@ -35,12 +35,12 @@ namespace TINB.ArticulatedBuses.Tests
         [Test]
         public void TrailerOffset_IsLinearUnderRotation()
         {
-            // rotate(q,a) - rotate(q,b) == rotate(q, a-b): the offset rotates rigidly with the front.
+            // rotate(q,a) - rotate(q,b) == rotate(q, a-b): the offset rotates rigidly with the front
             float3 frontAttach = new float3(0.2f, 0.0f, 3.1f);
             float3 trailerAttach = new float3(-0.1f, 0.0f, -4.3f);
             quaternion q = quaternion.AxisAngle(math.up(), math.radians(37f));
 
-            float3 offset = ArticulatedBusGeometry.ComputeTrailerOffset(q, frontAttach, trailerAttach);
+            float3 offset = ArticulatedBusGeometryHelper.ComputeTrailerOffset(q, frontAttach, trailerAttach);
             float3 expected = math.rotate(q, frontAttach - trailerAttach);
 
             Assert.That(math.distance(offset, expected), Is.LessThan(Tol));
@@ -49,12 +49,12 @@ namespace TINB.ArticulatedBuses.Tests
         [Test]
         public void TrailerOffset_NinetyDegYaw_MapsZToX()
         {
-            // attach difference is purely +Z; a +90° yaw about Y maps +Z onto +X (Unity left-handed forward=+Z).
+            // attach difference is purely +Z; a +90° yaw about Y maps +Z onto +X (Unity left-handed forward=+Z)
             float3 frontAttach = new float3(0f, 0f, 1f);
             float3 trailerAttach = float3.zero;
             quaternion yaw90 = quaternion.AxisAngle(math.up(), math.radians(90f));
 
-            float3 offset = ArticulatedBusGeometry.ComputeTrailerOffset(yaw90, frontAttach, trailerAttach);
+            float3 offset = ArticulatedBusGeometryHelper.ComputeTrailerOffset(yaw90, frontAttach, trailerAttach);
 
             Assert.That(math.abs(offset.x), Is.EqualTo(1f).Within(1e-3f));
             Assert.That(offset.z, Is.EqualTo(0f).Within(1e-3f));
@@ -65,8 +65,8 @@ namespace TINB.ArticulatedBuses.Tests
         [Test]
         public void Inflate_ExtendsRearwardForTrailerBehindFront()
         {
-            // front spans z in [-6, 6] (len 12); trailer [-7, 7] shifted back by offset -12 -> [-19, -5].
-            bool inflate = ArticulatedBusGeometry.TryComputeInflatedBoundsZ(
+            // front spans z in [-6, 6] (len 12); trailer [-7, 7] shifted back by offset -12 -> [-19, -5]
+            bool inflate = ArticulatedBusGeometryHelper.TryComputeInflatedBoundsZ(
                 frontMinZ: -6f, frontMaxZ: 6f,
                 trailerMinZ: -7f, trailerMaxZ: 7f,
                 trailerOffsetZ: -12f,
@@ -82,8 +82,8 @@ namespace TINB.ArticulatedBuses.Tests
         [Test]
         public void Inflate_NoOpWhenFrontAlreadySpansWholeBus()
         {
-            // trailer fully inside the front's z-extent -> combined length == front length -> do not inflate.
-            bool inflate = ArticulatedBusGeometry.TryComputeInflatedBoundsZ(
+            // trailer fully inside the front's z-extent -> combined length == front length -> do not inflate
+            bool inflate = ArticulatedBusGeometryHelper.TryComputeInflatedBoundsZ(
                 frontMinZ: -10f, frontMaxZ: 10f,
                 trailerMinZ: -1f, trailerMaxZ: 1f,
                 trailerOffsetZ: 0f,
@@ -96,8 +96,8 @@ namespace TINB.ArticulatedBuses.Tests
         [Test]
         public void Inflate_NeverShrinks()
         {
-            // even a tiny trailer can never produce a shorter combined length than the front.
-            bool inflate = ArticulatedBusGeometry.TryComputeInflatedBoundsZ(
+            // even a tiny trailer can never produce a shorter combined length than the front
+            bool inflate = ArticulatedBusGeometryHelper.TryComputeInflatedBoundsZ(
                 frontMinZ: -5f, frontMaxZ: 5f,
                 trailerMinZ: 0f, trailerMaxZ: 0.1f,
                 trailerOffsetZ: 0f,
@@ -112,16 +112,16 @@ namespace TINB.ArticulatedBuses.Tests
         [Test]
         public void Fraction_IsHalfOverN()
         {
-            Assert.That(ArticulatedBusGeometry.ConnectionBoneFraction(1), Is.EqualTo(0.5f).Within(Tol));
-            Assert.That(ArticulatedBusGeometry.ConnectionBoneFraction(2), Is.EqualTo(0.25f).Within(Tol));
-            Assert.That(ArticulatedBusGeometry.ConnectionBoneFraction(5), Is.EqualTo(0.1f).Within(Tol));
+            Assert.That(ArticulatedBusGeometryHelper.ConnectionBoneFraction(1), Is.EqualTo(0.5f).Within(Tol));
+            Assert.That(ArticulatedBusGeometryHelper.ConnectionBoneFraction(2), Is.EqualTo(0.25f).Within(Tol));
+            Assert.That(ArticulatedBusGeometryHelper.ConnectionBoneFraction(5), Is.EqualTo(0.1f).Within(Tol));
         }
 
         [Test]
         public void Fraction_ClampsNonPositiveCountToOne()
         {
-            Assert.That(ArticulatedBusGeometry.ConnectionBoneFraction(0), Is.EqualTo(0.5f).Within(Tol));
-            Assert.That(ArticulatedBusGeometry.ConnectionBoneFraction(-3), Is.EqualTo(0.5f).Within(Tol));
+            Assert.That(ArticulatedBusGeometryHelper.ConnectionBoneFraction(0), Is.EqualTo(0.5f).Within(Tol));
+            Assert.That(ArticulatedBusGeometryHelper.ConnectionBoneFraction(-3), Is.EqualTo(0.5f).Within(Tol));
         }
 
         [TestCase(10f, 1)]
@@ -131,9 +131,9 @@ namespace TINB.ArticulatedBuses.Tests
         public void Fraction_FanAccumulatesToExactHalfAngle(float degrees, int n)
         {
             // The core bellows guarantee: N bones each rotated by slerp(identity, q, 0.5/N) accumulate to q^0.5
-            // (the half-angle / seam bisector), independent of N. This is why a reduced LOD self-adapts.
+            // (the half-angle / seam bisector), independent of N. This is why a reduced LOD self-adapts
             quaternion q = quaternion.AxisAngle(math.normalize(new float3(0.3f, 1f, 0.2f)), math.radians(degrees));
-            float frac = ArticulatedBusGeometry.ConnectionBoneFraction(n);
+            float frac = ArticulatedBusGeometryHelper.ConnectionBoneFraction(n);
             quaternion perBone = math.slerp(quaternion.identity, q, frac);
 
             quaternion accumulated = quaternion.identity;
@@ -154,11 +154,11 @@ namespace TINB.ArticulatedBuses.Tests
             float3 a = new float3(1f, 2f, 3f);
             float3 b = new float3(5f, -4f, 9f);
 
-            float3 mid = ArticulatedBusGeometry.CapMidpoint(a, b);
+            float3 mid = ArticulatedBusGeometryHelper.CapMidpoint(a, b);
 
             Assert.That(math.distance(mid, new float3(3f, -1f, 6f)), Is.LessThan(Tol));
-            // symmetric: both sections compute the same seam point regardless of argument order.
-            Assert.That(math.distance(mid, ArticulatedBusGeometry.CapMidpoint(b, a)), Is.LessThan(Tol));
+            // symmetric: both sections compute the same seam point regardless of argument order
+            Assert.That(math.distance(mid, ArticulatedBusGeometryHelper.CapMidpoint(b, a)), Is.LessThan(Tol));
         }
     }
 }

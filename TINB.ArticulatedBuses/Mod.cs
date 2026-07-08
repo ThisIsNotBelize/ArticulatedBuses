@@ -7,26 +7,51 @@ using Game.SceneFlow;
 
 namespace TINB.ArticulatedBuses
 {
-    /* Mod entry point: schedules the systems and exposes the shared run-gate + diagnostics helpers */
+    /// <summary>
+    /// The mod entry point
+    /// </summary>
+    /// <remarks>
+    /// Registers the settings and schedules the mod's systems into the game's update phases
+    /// </remarks>
     public sealed class Mod : IMod
     {
+        /// <summary>
+        /// Developer log channel
+        /// </summary>
+        /// <remarks>
+        /// Writes to TINB.ArticulatedBuses.log, separate from the user-facing SessionLog
+        /// </remarks>
         public static readonly ILog Log = LogManager.GetLogger(nameof(TINB) + "." + nameof(ArticulatedBuses)).SetShowsErrorsInUI(false);
 
-        /* The options page (registered in all builds; null only before OnLoad has run). In Release its
-           DiagnosticLogging toggle drives IsDiagnosticLoggingEnabled; in Debug that is forced true regardless. */
+        /// <summary>
+        /// The mod's options page
+        /// </summary>
         public static ArticulatedBusSettings? Settings;
 
-        /* Run-gate for every gameplay system: true ONLY in an actual game (GameMode.Game). Must be positive (IsGame),
-           NOT !IsEditor: during an editor LOAD the mode is still MainMenu (it flips to Editor only at
-           OnGameLoadingComplete), so the old !IsEditor() form passed and let prefab setup/inflation mutate assets in
-           the editor. Editor-time work is handled solely by the IsEditor()-gated ArticulatedBusIconCreatorCompatSystem. */
-        public static bool ShouldRunRuntimeSystems()
+        /// <summary>
+        /// Whether the game is in an active city
+        /// </summary>
+        /// <returns>True when a city simulation is running (not editor, menu, or loading)</returns>
+        public static bool IsInGame()
         {
             return GameManager.instance != null && GameManager.instance.gameMode.IsGame();
         }
 
-        /* Whether the developer diagnostic log is on. Two tiers: a Debug build ALWAYS logs (it exists for debugging);
-           a Release build logs only when the user turns on the options toggle (off by default). */
+        /// <summary>
+        /// Whether the game is in the asset or map editor
+        /// </summary>
+        /// <returns>True when the editor is active</returns>
+        public static bool IsInEditor()
+        {
+            return GameManager.instance != null && GameManager.instance.gameMode.IsEditor();
+        }
+
+        /// <summary>
+        /// Whether developer diagnostic logging is enabled
+        /// </summary>
+        /// <remarks>
+        /// In a debug build always on; in a release build the user switches it on in settings
+        /// </remarks>
         public static bool IsDiagnosticLoggingEnabled()
         {
             #if ARTICULATEDBUSES_DIAGNOSTICS
@@ -36,16 +61,18 @@ namespace TINB.ArticulatedBuses
             #endif
         }
 
-        /* Schedules each system into its update phase */
+        /// <summary>
+        /// Register the settings and schedule the mod's systems
+        /// </summary>
         public void OnLoad(UpdateSystem updateSystem)
         {
-            Log.Info("Loading ArticulatedBuses");
+            Log.Info("Loading ArticulatedBuses Mod");
 
-            /* Options page (all builds): the Diagnostic logging toggle. In Release it drives diagnostic logging (off
-               by default); in Debug logging is always on and the toggle is shown but inert. */
+            // Options page
             Settings = new ArticulatedBusSettings(this);
             Settings.RegisterInOptionsUI();
-            /* Load translations from the deployed lang/ folder (one JSON per locale). No mod dependency. */
+
+            // Load translations from the deployed lang/ folder (one JSON per locale)
             if (GameManager.instance.modManager.TryGetExecutableAsset(this, out ExecutableAsset modAsset))
             {
                 string langDir = Path.Combine(Path.GetDirectoryName(modAsset.path), "lang");
@@ -53,47 +80,55 @@ namespace TINB.ArticulatedBuses
             }
             AssetDatabase.global.LoadSettings("TINB.ArticulatedBuses", Settings, new ArticulatedBusSettings(this));
 
-            /* Reset the session log each load */
+            // Reset the session log (each load)
             updateSystem.UpdateAt<ArticulatedBusSessionLogSystem>(SystemUpdatePhase.Modification1);
 
-            /* Prep applicable bus prefabs: trailer link, livery, doors, parking length */
+            // Prefab handling
+
+            // Identify and set up bus prefabs
             updateSystem.UpdateAfter<ArticulatedBusPrefabSetupSystem, Game.Prefabs.VehicleInitializeSystem>(SystemUpdatePhase.PrefabUpdate);
 
-            /* Attach a trailers */
-            updateSystem.UpdateBefore<ArticulatedBusTrailerSpawnSystem, Game.Vehicles.InitializeSystem>(SystemUpdatePhase.Modification5);
+            // Spawn trailer prefabs
+            updateSystem.UpdateBefore<ArticulatedBusTrailerSpawnSystem, Game.Vehicles.InitializeSystem>(SystemUpdatePhase.Modification5); // starting off right before vehicle initialisation in the last modification block of the simulation phase
 
-            /* Delete orphaned trailers (no front) */
-            updateSystem.UpdateAfter<ArticulatedBusOrphanTrailerCleanupSystem, ArticulatedBusTrailerSpawnSystem>(SystemUpdatePhase.Modification5);
+            // Re-attach a missing trailer to a live front
+            updateSystem.UpdateAfter<ArticulatedBusTrailerRestoreSystem, ArticulatedBusTrailerSpawnSystem>(SystemUpdatePhase.Modification5); // continuing at the end of the modification stage of the simulation phase
 
-            /* Remove ALL articulated buses on request (options-page button; e.g. before mod removal) */
-            updateSystem.UpdateAfter<ArticulatedBusCleanupSystem, ArticulatedBusTrailerSpawnSystem>(SystemUpdatePhase.Modification5);
+            // Delete orphaned trailers
+            updateSystem.UpdateAfter<ArticulatedBusOrphanTrailerCleanupSystem, ArticulatedBusTrailerRestoreSystem>(SystemUpdatePhase.Modification5);
 
-            /* Fix for 1.0.1 parked fronts 
-               @TODO: Remove in new version after 31 July 2026 */
-            updateSystem.UpdateAfter<ArticulatedBusParkedFrontFixSystem, ArticulatedBusTrailerSpawnSystem>(SystemUpdatePhase.Modification5);
+            // Remove all articulated buses (triggered manually by user via options-page button; e.g. before mod removal)
+            updateSystem.UpdateAfter<ArticulatedBusCleanupSystem, ArticulatedBusOrphanTrailerCleanupSystem>(SystemUpdatePhase.Modification5);
 
-            /* Re-attach a missing trailer to a live front */
-            updateSystem.UpdateAfter<ArticulatedBusTrailerRestoreSystem, ArticulatedBusParkedFrontFixSystem>(SystemUpdatePhase.Modification5);
+            // Legacy Fix for 1.0.1 parked fronts
+            // @TODO: Remove in any new version released after 31 July 2026
+            updateSystem.UpdateAfter<ArticulatedBusParkedFrontFixSystem, ArticulatedBusCleanupSystem>(SystemUpdatePhase.Modification5);
 
-            /* Periodically log the states to monitor past sources of CTDs (up to 1.0.2): a parked front still carrying a trailer layout
-               (depot-upgrade CTD), a trailer whose front is gone, or a front with more than one trailer */
-            updateSystem.UpdateAfter<ArticulatedBusSelfCheckSystem, ArticulatedBusTrailerRestoreSystem>(SystemUpdatePhase.Modification5);
 
-            /* Asset Icon Creator support (editor) */
-            updateSystem.UpdateAt<ArticulatedBusIconCreatorCompatSystem>(SystemUpdatePhase.Modification1);
+            // Rendering
 
-            /* Framewise bone-rendering */
-            updateSystem.UpdateAfter<ArticulatedBusConnectionBoneSystem, Game.Rendering.ObjectInterpolateSystem>(SystemUpdatePhase.Rendering);
-            updateSystem.UpdateBefore<ArticulatedBusConnectionBoneSystem, Game.Rendering.ProceduralSkeletonSystem>(SystemUpdatePhase.Rendering);
+            // Framewise bone-rendering
+            updateSystem.UpdateAfter<ArticulatedBusConnectionBoneSystem, Game.Rendering.ObjectInterpolateSystem>(SystemUpdatePhase.Rendering); // start after vanilla's vehicle transforms applied to solve the bend angle
+            updateSystem.UpdateBefore<ArticulatedBusConnectionBoneSystem, Game.Rendering.ProceduralSkeletonSystem>(SystemUpdatePhase.Rendering); // update skeleton/bone buffers before processed in frame
 
-            /* Sync trailer colour to the front */
+            // Sync trailer color to the front
             updateSystem.UpdateAfter<ArticulatedBusColorSyncSystem, Game.Rendering.ObjectInterpolateSystem>(SystemUpdatePhase.Rendering);
+
+            // Misc
+
+            // Asset Icon Creator support (editor only)
+            updateSystem.UpdateAt<ArticulatedBusIconCreatorCompatSystem>(SystemUpdatePhase.Modification1);
         }
 
-        /* Unload hook: take the options page down so a mod reload can't register it twice */
+        /// <summary>
+        /// Unregister the options page on unload
+        /// </summary>
+        /// <remarks>
+        /// So a mod reload can't register it twice
+        /// </remarks>
         public void OnDispose()
         {
-            Log.Info("Disposing ArticulatedBuses");
+            Log.Info("Disposing ArticulatedBuses Mod");
             Settings?.UnregisterInOptionsUI();
             Settings = null;
         }

@@ -9,10 +9,12 @@ using VehiclePublicTransport = Game.Vehicles.PublicTransport;
 
 namespace TINB.ArticulatedBuses
 {
-    /* One-shot "remove all articulated buses" requested from the options page. Deletes every articulated bus front
-       together with its layout members, plus any stray articulated trailer, the vanilla way (Deleted tag). Lines and
-       depots are untouched and dispatch replacement buses. Lets a user produce a clean save before removing the mod,
-       or repair a save by re-installing the mod once, cleaning up, saving and removing it again. */
+    /// <summary>
+    /// Remove all articulated buses
+    /// </summary>
+    /// <remarks>
+    /// Manually fired via the settings button
+    /// </remarks>
     public sealed partial class ArticulatedBusCleanupSystem : GameSystemBase
     {
         private static volatile bool s_CleanupRequested;
@@ -20,32 +22,33 @@ namespace TINB.ArticulatedBuses
         private EntityQuery m_FrontQuery;
         private EntityQuery m_TrailerQuery;
 
-        /* Called by the options button. Only accepted while actually in a game, so a click in the main menu can't
-           arm a deletion that would fire on the next city load. */
+        /// <summary>
+        /// Request a cleanup of all articulated buses
+        /// </summary>
+        /// <remarks>
+        /// Called by the settings button
+        /// </remarks>
         public static void RequestCleanup()
         {
-            if (!Mod.ShouldRunRuntimeSystems())
+            if (!Mod.IsInGame())
             {
                 SessionLog.Event("cleanup request ignored (not in a game)");
                 return;
             }
 
             s_CleanupRequested = true;
-            SessionLog.Event("cleanup of all articulated buses requested via options");
-
-            /* Also to the dev log: it is append-only across the launch, so this survives the reloads that truncate
-               the session log — keeping the cleanup verifiable after the user saves and reloads */
-            if (Mod.IsDiagnosticLoggingEnabled())
-            {
-                Mod.Log.Info("Articulated bus cleanup requested via options");
-            }
+            SessionLog.Event("cleanup of all articulated buses requested via settings");
+            SessionLog.Diagnostic("Articulated bus cleanup requested via settings");
         }
 
+        /// <summary>
+        /// Build the queries for all articulated fronts and trailers
+        /// </summary>
         protected override void OnCreate()
         {
             base.OnCreate();
 
-            // Live articulated fronts, parked or driving (filtered to our buses in code).
+            // Live articulated fronts, parked or driving
             m_FrontQuery = GetEntityQuery(new EntityQueryDesc
             {
                 All = new[]
@@ -62,7 +65,7 @@ namespace TINB.ArticulatedBuses
                 }
             });
 
-            // All trailer instances (catches orphans and layout-less strays too).
+            // All trailer instances (catches orphans and layout-less strays too)
             m_TrailerQuery = GetEntityQuery(new EntityQueryDesc
             {
                 All = new[]
@@ -78,29 +81,34 @@ namespace TINB.ArticulatedBuses
             });
         }
 
+        /// <summary>
+        /// Filter to articulated buses and remove their fronts, layout members, and orphan trailers
+        /// </summary>
         protected override void OnUpdate()
         {
-            if (!s_CleanupRequested || !Mod.ShouldRunRuntimeSystems())
+            if (!s_CleanupRequested || !Mod.IsInGame())
             {
                 return;
             }
 
-            s_CleanupRequested = false;
+            s_CleanupRequested = false; // Reset once fired
 
             EntityManager entityManager = EntityManager;
+            // Stats
             int frontsDeleted = 0;
             int trailersDeleted = 0;
 
             try
             {
-                /* Fronts first: delete the front and every layout member, mirroring vanilla VehicleUtils.DeleteVehicle */
+                // Delete the front and trailers (as layout members of fronts), mirroring vanilla VehicleUtils.DeleteVehicle
                 NativeArray<Entity> fronts = m_FrontQuery.ToEntityArray(Allocator.Temp);
                 try
                 {
                     for (int i = 0; i < fronts.Length; i++)
                     {
                         Entity front = fronts[i];
-                        if (!IsArticulatedBusFront(entityManager, front))
+                        // Only if is articulated bus front
+                        if (!ArticulatedBusPrefabHelper.IsArticulatedBusFrontEntity(entityManager, front))
                         {
                             continue;
                         }
@@ -129,14 +137,14 @@ namespace TINB.ArticulatedBuses
                     fronts.Dispose();
                 }
 
-                /* Then any articulated trailer not caught above (orphans, strays) */
+                // Delete orphan trailers
                 NativeArray<Entity> trailers = m_TrailerQuery.ToEntityArray(Allocator.Temp);
                 try
                 {
                     for (int i = 0; i < trailers.Length; i++)
                     {
                         Entity trailer = trailers[i];
-                        if (entityManager.HasComponent<Deleted>(trailer) || !IsArticulatedBusTrailer(entityManager, trailer))
+                        if (entityManager.HasComponent<Deleted>(trailer) || !ArticulatedBusPrefabHelper.IsArticulatedBusTrailerEntity(entityManager, trailer))
                         {
                             continue;
                         }
@@ -150,11 +158,8 @@ namespace TINB.ArticulatedBuses
                     trailers.Dispose();
                 }
 
-                SessionLog.Event($"cleanup done: removed {frontsDeleted} articulated bus front(s) and {trailersDeleted} trailer(s); lines/depots untouched");
-                if (Mod.IsDiagnosticLoggingEnabled())
-                {
-                    Mod.Log.InfoFormat("Articulated bus cleanup done: removed {0} front(s) and {1} trailer(s); lines/depots untouched", frontsDeleted, trailersDeleted);
-                }
+                SessionLog.Event($"cleanup done: removed {frontsDeleted} articulated bus front(s) and {trailersDeleted} trailer(s)");
+                SessionLog.Diagnostic($"Articulated bus cleanup done: removed {frontsDeleted} front(s) and {trailersDeleted} trailer(s)");
             }
             catch (System.Exception ex)
             {
@@ -162,28 +167,5 @@ namespace TINB.ArticulatedBuses
             }
         }
 
-        /* True if the front's prefab declares a fixed trailer (i.e. it is one of our articulated buses) */
-        private static bool IsArticulatedBusFront(EntityManager entityManager, Entity front)
-        {
-            Entity frontPrefab = entityManager.GetComponentData<PrefabRef>(front).m_Prefab;
-            return entityManager.HasComponent<CarTractorData>(frontPrefab) &&
-                   entityManager.GetComponentData<CarTractorData>(frontPrefab).m_FixedTrailer != Entity.Null;
-        }
-
-        /* True only for our trailers: a Fixed trailer whose (runtime-repaired) fixed tractor is a public-transport
-           bus prefab */
-        private static bool IsArticulatedBusTrailer(EntityManager entityManager, Entity trailer)
-        {
-            Entity trailerPrefab = entityManager.GetComponentData<PrefabRef>(trailer).m_Prefab;
-            if (!entityManager.HasComponent<CarTrailerData>(trailerPrefab))
-            {
-                return false;
-            }
-
-            CarTrailerData trailerData = entityManager.GetComponentData<CarTrailerData>(trailerPrefab);
-            return trailerData.m_TrailerType == CarTrailerType.Fixed &&
-                   trailerData.m_FixedTractor != Entity.Null &&
-                   entityManager.HasComponent<PublicTransportVehicleData>(trailerData.m_FixedTractor);
-        }
     }
 }

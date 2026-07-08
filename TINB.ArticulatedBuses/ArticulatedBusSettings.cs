@@ -4,10 +4,10 @@ using Game.Settings;
 
 namespace TINB.ArticulatedBuses
 {
-    /* The mod's options page (registered in all builds). Holds the Diagnostic logging toggle. In a Release build the
-       toggle drives diagnostic logging (off by default). In a Debug build diagnostic logging is always on (compile
-       symbol), so the toggle is shown but inert there — it just lets us see exactly what Release users see. */
-    [FileLocation("ModsSettings/TINB.ArticulatedBuses/settings")]
+    /// <summary>
+    /// Mod settings
+    /// </summary>
+    [FileLocation("ModsSettings/TINB.ArticulatedBuses/settings")] // game's default mod settings path
     [SettingsUIGroupOrder(DiagnosticsGroup, PreRemovalGroup)]
     [SettingsUIShowGroupName(DiagnosticsGroup, PreRemovalGroup)]
     public sealed class ArticulatedBusSettings : ModSetting
@@ -16,17 +16,22 @@ namespace TINB.ArticulatedBuses
         public const string DiagnosticsGroup = "Diagnostics";
         public const string PreRemovalGroup = "PreRemoval";
 
+        /// <summary>
+        /// Create the settings, bound to the mod
+        /// </summary>
         public ArticulatedBusSettings(IMod mod) : base(mod)
         {
         }
 
-        /* Runtime override of the compile-time diagnostics default; read by Mod.IsDiagnosticLoggingEnabled */
+        /// <summary>
+        /// Developer diagnostic logging toggle
+        /// </summary>
         [SettingsUISection(MainTab, DiagnosticsGroup)]
         public bool DiagnosticLogging { get; set; }
 
-        /* Mod pre-removal cleanup (one-shot): delete every articulated bus in the city (lines/depots stay; they
-           dispatch new buses). Precautionary, for users who plan to remove the mod and want a 100%-clean save first;
-           doubles as a save repair. Confirmed via the vanilla dialog; only accepted while in a game. */
+        /// <summary>
+        /// Mod pre-removal cleanup button
+        /// </summary>
         [SettingsUIButton]
         [SettingsUIConfirmation]
         [SettingsUISection(MainTab, PreRemovalGroup)]
@@ -35,9 +40,12 @@ namespace TINB.ArticulatedBuses
             set { ArticulatedBusCleanupSystem.RequestCleanup(); }
         }
 
+        /// <summary>
+        /// Apply the default setting values
+        /// </summary>
         public override void SetDefaults()
         {
-            // Off by default: the Release default, and what a Debug build shows too (Debug logging is always on anyway)
+            // Off by default (Debug logging is always on)
             DiagnosticLogging = false;
         }
     }

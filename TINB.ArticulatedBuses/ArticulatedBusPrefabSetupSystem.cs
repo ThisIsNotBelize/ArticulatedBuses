@@ -10,12 +10,14 @@ using Unity.Mathematics;
 
 namespace TINB.ArticulatedBuses
 {
-    /* Runs in PrefabUpdate (after the vanilla VehicleInitializeSystem), once per bus prefab: fills in the
-       trailer's reverse CarTrailerData.m_FixedTractor link, copies the front's colour/livery onto the trailer,
-       and copies the trailer's boarding/alighting doors onto the front (so passengers use them) */
+    /// <summary>
+    /// Sets up articulated bus prefabs
+    /// </summary>
     public sealed partial class ArticulatedBusPrefabSetupSystem : GameSystemBase
     {
-        /* "Already handled" sets, so each repair/diagnostic fires once per prefab */
+        /// <summary>
+        /// Sets for already handled prefabs
+        /// </summary>
         private readonly HashSet<Entity> m_WarnedMismatches = new HashSet<Entity>();
         private readonly HashSet<Entity> m_WarnedNonFixedBuses = new HashSet<Entity>();
         private readonly HashSet<Entity> m_WarnedNonFixedTrailers = new HashSet<Entity>();
@@ -23,9 +25,9 @@ namespace TINB.ArticulatedBuses
         private readonly HashSet<Entity> m_ColorSyncedTrailers = new HashSet<Entity>();
         private readonly HashSet<Entity> m_ActivityLocationSyncedBuses = new HashSet<Entity>();
 
-        /* Pre-inflation z-geometry per inflated front prefab, so leaving the game can restore it. Prefab entities
-           live in the ONE shared World across game/menu/editor, so an inflated front would otherwise stay inflated
-           when the same session later opens the editor. */
+        /// <summary>
+        /// Original prefab z-geometry storage
+        /// </summary>
         private struct OriginalGeometryZ
         {
             public float m_MinZ;
@@ -35,16 +37,36 @@ namespace TINB.ArticulatedBuses
 
         private readonly Dictionary<Entity, OriginalGeometryZ> m_InflatedFronts = new Dictionary<Entity, OriginalGeometryZ>();
 
+        /// <summary>
+        /// Original ActivityLocationElement count per front prefab
+        /// </summary>
+        /// <remarks>
+        /// So leaving the game can drop the copied trailer doors
+        /// </remarks>
+        private readonly Dictionary<Entity, int> m_SyncedActivityFronts = new Dictionary<Entity, int>();
+
+        /// <summary>
+        /// Cached bus-prefab query and PrefabSystem
+        /// </summary>
+        /// <remarks>
+        /// PrefabSystem is used for prefab-name lookups
+        /// </remarks>
         private EntityQuery m_BusPrefabQuery;
         private PrefabSystem m_PrefabSystem = null!;
 
-        /* Query: bus front prefabs (car + public-transport + tractor data) */
+        /// <summary>
+        /// Get the query for articulated bus prefabs
+        /// </summary>
+        /// <remarks>
+        /// Assumed articulated buses are a car prefab plus public-transport component plus car tractor component
+        /// </remarks>
         protected override void OnCreate()
         {
             base.OnCreate();
 
             m_PrefabSystem = World.GetOrCreateSystemManaged<PrefabSystem>();
 
+            // construct query
             m_BusPrefabQuery = GetEntityQuery(new EntityQueryDesc
             {
                 All = new[]
@@ -61,13 +83,16 @@ namespace TINB.ArticulatedBuses
                 }
             });
 
+            // run OnUpdate when matching prefabs
             RequireForUpdate(m_BusPrefabQuery);
         }
 
-        /* Sets up each matching bus prefab */
+        /// <summary>
+        /// Set up bus prefabs
+        /// </summary>
         protected override void OnUpdate()
         {
-            if (!Mod.ShouldRunRuntimeSystems())
+            if (!Mod.IsInGame())
             {
                 return;
             }
@@ -79,7 +104,7 @@ namespace TINB.ArticulatedBuses
             {
                 for (int i = 0; i < busPrefabs.Length; i++)
                 {
-                    SetUpBusPrefab(entityManager, busPrefabs[i], Mod.IsDiagnosticLoggingEnabled());
+                    SetUpBusPrefab(entityManager, busPrefabs[i]);
                 }
             }
             finally
@@ -88,10 +113,16 @@ namespace TINB.ArticulatedBuses
             }
         }
 
-        /* Syncs the trailer's colours to the front and fills the reverse m_FixedTractor link (runtime-only; the
-           saved asset leaves it empty, since a serialized circular front<->trailer ref crashes on load) */
-        private void SetUpBusPrefab(EntityManager entityManager, Entity busPrefab, bool diagnosticLogging)
+        /// <summary>
+        /// Link a trailer to its bus front prefab
+        /// </summary>
+        /// <remarks>
+        /// Runtime-only to preserve vanilla-compatibility of prefabs; also a serialized circular front-trailer ref
+        /// crashes on load
+        /// </remarks>
+        private void SetUpBusPrefab(EntityManager entityManager, Entity busPrefab)
         {
+            // Get trailer from tractor component
             CarTractorData tractorData = entityManager.GetComponentData<CarTractorData>(busPrefab);
             Entity trailerPrefab = tractorData.m_FixedTrailer;
             if (trailerPrefab == Entity.Null)
@@ -99,79 +130,83 @@ namespace TINB.ArticulatedBuses
                 return;
             }
 
+            // Only if fixed trailer set
             if (tractorData.m_TrailerType != CarTrailerType.Fixed)
             {
-                if (diagnosticLogging && m_WarnedNonFixedBuses.Add(busPrefab))
+                if (m_WarnedNonFixedBuses.Add(busPrefab))
                 {
-                    Mod.Log.WarnFormat("Bus prefab {0} uses fixed trailer prefab {1}, but tractor trailer type is {2} instead of Fixed", busPrefab, trailerPrefab, tractorData.m_TrailerType);
+                    SessionLog.DiagnosticWarn($"Bus prefab {busPrefab} uses fixed trailer prefab {trailerPrefab}, but tractor trailer type is {tractorData.m_TrailerType} instead of Fixed");
                 }
                 return;
             }
 
+            // Only if trailer is a proper car trailer prefab
             if (!entityManager.HasComponent<CarTrailerData>(trailerPrefab))
             {
                 return;
             }
 
+            // Only if trailer set to fixed
             CarTrailerData trailerData = entityManager.GetComponentData<CarTrailerData>(trailerPrefab);
             if (trailerData.m_TrailerType != CarTrailerType.Fixed)
             {
-                if (diagnosticLogging && m_WarnedNonFixedTrailers.Add(trailerPrefab))
+                if (m_WarnedNonFixedTrailers.Add(trailerPrefab))
                 {
-                    Mod.Log.WarnFormat("Bus prefab {0} fixed trailer {1} uses trailer type {2} instead of Fixed", busPrefab, trailerPrefab, trailerData.m_TrailerType);
+                    SessionLog.DiagnosticWarn($"Bus prefab {busPrefab} fixed trailer {trailerPrefab} uses trailer type {trailerData.m_TrailerType} instead of Fixed");
                 }
                 return;
             }
 
-            SyncTrailerColors(entityManager, busPrefab, trailerPrefab, diagnosticLogging);
-            SyncTrailerActivityLocations(entityManager, busPrefab, trailerPrefab, tractorData, trailerData, diagnosticLogging);
-            InflateFrontParkingLength(entityManager, busPrefab, trailerPrefab, tractorData, trailerData, diagnosticLogging);
-
+            // Already reverse-linked to this front on an earlier pass, so skip
             if (trailerData.m_FixedTractor == busPrefab)
             {
                 return;
             }
 
+            // Only allow unique front-trailer combinations. (avoid oubling of one trailer to multiple front prefabs as this leads to one front missing out its trailer)
             if (trailerData.m_FixedTractor != Entity.Null)
             {
-                /* The trailer prefab is already claimed by another front: two fronts share one trailer prefab. The
-                   first front kept the reverse link, so THIS front's instances fail the spawn guard and run with no
-                   trailer. Warn ALWAYS via the session log (so other creators see it without a dev-diagnostics
-                   build); each front needs its own unique trailer prefab. Deduped per trailer prefab. */
+                // Add to warning set and log
                 if (m_WarnedMismatches.Add(trailerPrefab))
                 {
                     SessionLog.Warn(
-                        $"trailer prefab '{TryGetPrefabName(trailerPrefab)}' is shared by multiple bus fronts " +
-                        $"('{TryGetPrefabName(trailerData.m_FixedTractor)}' owns it; '{TryGetPrefabName(busPrefab)}' also points to it) — " +
-                        "each front needs its OWN unique trailer prefab, or the extra front(s) will run with no trailer");
+                        $"trailer prefab '{ArticulatedBusPrefabHelper.GetPrefabName(m_PrefabSystem, trailerPrefab)}' is shared by multiple bus fronts " +
+                        $"('{ArticulatedBusPrefabHelper.GetPrefabName(m_PrefabSystem, trailerData.m_FixedTractor)}' owns it; '{ArticulatedBusPrefabHelper.GetPrefabName(m_PrefabSystem, busPrefab)}' also points to it). " +
+                        "Each front needs its unique trailer prefab, or the extra front(s) will run with no trailer");
 
-                    if (diagnosticLogging)
-                    {
-                        Mod.Log.WarnFormat("Bus prefab {0} fixed trailer {1} already points to tractor {2} (shared trailer prefab; {0} will run trailerless)", busPrefab, trailerPrefab, trailerData.m_FixedTractor);
-                    }
+                    SessionLog.DiagnosticWarn($"Bus prefab {busPrefab} fixed trailer {trailerPrefab} already points to tractor {trailerData.m_FixedTractor} (shared trailer prefab; {busPrefab} will run trailerless)");
                 }
 
                 return;
             }
 
+            // Copy the front's color variations onto the trailer prefab
+            CopyColorVariations(entityManager, busPrefab, trailerPrefab);
+            // Expand activity locations from trailer to front (otherwise the game will ignore those on trailers)
+            SyncTrailerActivityLocations(entityManager, busPrefab, trailerPrefab, tractorData, trailerData);
+            // Caclulate (inflate) the front prefabs geometry bounds, so it will not use too small parkings, e.g. at the depot
+            InflateFrontParkingLength(entityManager, busPrefab, trailerPrefab, tractorData, trailerData);
+
+            // Set the runtime-only reverse link (trailer prefab -> front)
             trailerData.m_FixedTractor = busPrefab;
             entityManager.SetComponentData(trailerPrefab, trailerData);
 
-            if (diagnosticLogging && m_RuntimeLinkedTrailers.Add(trailerPrefab))
+            if (m_RuntimeLinkedTrailers.Add(trailerPrefab))
             {
-                Mod.Log.InfoFormat("Applied runtime-only articulated bus reverse link from trailer prefab {0} to bus prefab {1}", trailerPrefab, busPrefab);
+                SessionLog.Diagnostic($"Applied runtime-only articulated bus reverse link from trailer prefab {trailerPrefab} to bus prefab {busPrefab}");
             }
         }
 
-        /* Extends the front prefab's logical length (ObjectGeometryData.m_Bounds along z) to cover the WHOLE
-           assembled bus (front + trailer) — computed from both prefabs' geometry bounds and their attach offsets,
-           so it is correct for any creator's asset dimensions. With the front reported this long, the return
-           pathfind rejects every single-bus depot bay (bay m_MaxCarLength < full bus length) and the bus always
-           GARAGES instead of surface-parking, so the trailer never overhangs the driveway and is never bay-parked.
-           Only m_Bounds is read by GetParkingSize; extending it changes the culling/collision/parking footprint
-           only, NOT the visible mesh (so the bus still looks and selects normally). */
-        private void InflateFrontParkingLength(EntityManager entityManager, Entity busPrefab, Entity trailerPrefab, CarTractorData tractorData, CarTrailerData trailerData, bool diagnosticLogging)
+        /// <summary>
+        /// Inflate the front prefab's geometry bounds
+        /// </summary>
+        /// <remarks>
+        /// Stretches the front's parking length to span the whole bus, so it garages at a depot instead of taking an
+        /// undersized bay
+        /// </remarks>
+        private void InflateFrontParkingLength(EntityManager entityManager, Entity busPrefab, Entity trailerPrefab, CarTractorData tractorData, CarTrailerData trailerData)
         {
+            // Avoid duplication
             if (m_InflatedFronts.ContainsKey(busPrefab) ||
                 !entityManager.HasComponent<ObjectGeometryData>(busPrefab) ||
                 !entityManager.HasComponent<ObjectGeometryData>(trailerPrefab))
@@ -179,19 +214,20 @@ namespace TINB.ArticulatedBuses
                 return;
             }
 
+            // Get geometries
             ObjectGeometryData frontGeometry = entityManager.GetComponentData<ObjectGeometryData>(busPrefab);
             ObjectGeometryData trailerGeometry = entityManager.GetComponentData<ObjectGeometryData>(trailerPrefab);
 
-            /* When assembled straight, the trailer origin sits at (front attach - trailer attach) relative to the
-               front, so shift the trailer's z-bounds by that offset and union with the front's z-bounds */
+            // The trailer origin sits at (front attach - trailer attach) relative to the
+            // front, so shift the trailer's z-bounds by that offset and union with the front's z-bounds
             float trailerOffsetZ = tractorData.m_AttachPosition.z - trailerData.m_AttachPosition.z;
-            if (!ArticulatedBusGeometry.TryComputeInflatedBoundsZ(
+            if (!ArticulatedBusGeometryHelper.TryComputeInflatedBoundsZ(
                     frontGeometry.m_Bounds.min.z, frontGeometry.m_Bounds.max.z,
                     trailerGeometry.m_Bounds.min.z, trailerGeometry.m_Bounds.max.z,
                     trailerOffsetZ,
                     out float combinedMinZ, out float combinedMaxZ, out float combinedLength))
             {
-                return; // front bounds already span the whole bus (or unexpected geometry) -> nothing to do
+                return; // front bounds already span the whole bus (or unexpected geometry), so nothing to do
             }
 
             float currentLength = frontGeometry.m_Bounds.max.z - frontGeometry.m_Bounds.min.z;
@@ -207,26 +243,28 @@ namespace TINB.ArticulatedBuses
             frontGeometry.m_Size.z = combinedLength;
             entityManager.SetComponentData(busPrefab, frontGeometry);
 
-            if (diagnosticLogging)
-            {
-                Mod.Log.InfoFormat("Inflated front {0} parking length {1:F2}m -> {2:F2}m (full bus, force depot garaging)", busPrefab, currentLength, combinedLength);
-            }
+            SessionLog.Diagnostic($"Inflated front {busPrefab} parking length {currentLength:F2}m -> {combinedLength:F2}m (full bus, force depot garaging)");
         }
 
-        /* Prefab entities survive mode changes in the shared World, so when the next load is NOT a game (main menu,
-           editor), put every inflated front's original z-geometry back. Without this, opening the editor after a
-           game session would show (and save-thumbnail/collide) the front with full articulated length. Cleared so a
-           later game load re-inflates and re-records fresh values. */
+        /// <summary>
+        /// Revert the prefab mutations that must not leak into the editor or main menu
+        /// </summary>
+        /// <remarks>
+        /// Reverts the z-geometry and the copied trailer activity locations, since prefabs live in the shared World
+        /// across modes
+        /// </remarks>
         protected override void OnGamePreload(Purpose purpose, GameMode mode)
         {
             base.OnGamePreload(purpose, mode);
 
-            if (mode.IsGame() || m_InflatedFronts.Count == 0)
+            if (mode.IsGame() || (m_InflatedFronts.Count == 0 && m_SyncedActivityFronts.Count == 0))
             {
                 return;
             }
 
             EntityManager entityManager = EntityManager;
+
+            // Revert inflated parking length
             int restored = 0;
             foreach (KeyValuePair<Entity, OriginalGeometryZ> entry in m_InflatedFronts)
             {
@@ -246,15 +284,37 @@ namespace TINB.ArticulatedBuses
 
             m_InflatedFronts.Clear();
 
-            if (restored > 0 && Mod.IsDiagnosticLoggingEnabled())
+            // Drop the copied trailer activity locations back to the front's own count
+            foreach (KeyValuePair<Entity, int> entry in m_SyncedActivityFronts)
             {
-                Mod.Log.InfoFormat("Restored original parking length on {0} bus prefab(s) (leaving game mode)", restored);
+                Entity busPrefab = entry.Key;
+                if (!entityManager.Exists(busPrefab) || !entityManager.HasBuffer<ActivityLocationElement>(busPrefab))
+                {
+                    continue;
+                }
+
+                DynamicBuffer<ActivityLocationElement> frontLocations = entityManager.GetBuffer<ActivityLocationElement>(busPrefab);
+                if (frontLocations.Length > entry.Value)
+                {
+                    frontLocations.ResizeUninitialized(entry.Value);
+                }
+            }
+
+            m_SyncedActivityFronts.Clear();
+
+            // Clear the once-per-prefab guard so the activity sync re-runs on the next game load
+            m_ActivityLocationSyncedBuses.Clear();
+
+            if (restored > 0)
+            {
+                SessionLog.Diagnostic($"Restored original parking length on {restored} bus prefab(s) (leaving game mode)");
             }
         }
 
-        /* Copies the front's ColorVariation set onto the trailer's render prefabs so both share one livery; runs
-           once per trailer prefab, and leaves non-Brand trailers (or trailers without ColorProperties) alone */
-        private void SyncTrailerColors(EntityManager entityManager, Entity busPrefab, Entity trailerPrefab, bool diagnosticLogging)
+        /// <summary>
+        /// Copy front bus prefab color variations to the trailer
+        /// </summary>
+        private void CopyColorVariations(EntityManager entityManager, Entity busPrefab, Entity trailerPrefab)
         {
             if (!m_ColorSyncedTrailers.Add(trailerPrefab))
             {
@@ -311,18 +371,20 @@ namespace TINB.ArticulatedBuses
 
             source.Dispose();
 
-            if (diagnosticLogging && syncedMeshes > 0)
+            if (syncedMeshes > 0)
             {
-                Mod.Log.InfoFormat("Synced {0} trailer render-prefab color variation set(s) on {1} to bus prefab {2}", syncedMeshes, trailerPrefab, busPrefab);
+                SessionLog.Diagnostic($"Synced {syncedMeshes} trailer render-prefab color variation set(s) on {trailerPrefab} to bus prefab {busPrefab}");
             }
         }
 
-        /* Copies the trailer's boarding/alighting (Enter/Exit) activity locations onto the FRONT prefab, offset
-           to the trailer's straight-behind position. The game reads a passenger's door position only from the
-           boarded vehicle's prefab (the front), so without this the trailer's own doors are never used. The
-           copied doors sit in the front's rest space, so they line up exactly when the bus is straight (the
-           usual case at an in-lane stop) and only drift on a curved stop. Runs once per bus prefab */
-        private void SyncTrailerActivityLocations(EntityManager entityManager, Entity busPrefab, Entity trailerPrefab, CarTractorData tractorData, CarTrailerData trailerData, bool diagnosticLogging)
+        /// <summary>
+        /// Copy trailer activity locations onto the front bus prefab
+        /// </summary>
+        /// <remarks>
+        /// Only boarding/disembarking locations. The game reads a passenger's door position only from the boarded
+        /// vehicle's prefab (the actual transport prefab / front)
+        /// </remarks>
+        private void SyncTrailerActivityLocations(EntityManager entityManager, Entity busPrefab, Entity trailerPrefab, CarTractorData tractorData, CarTrailerData trailerData)
         {
             if (!m_ActivityLocationSyncedBuses.Add(busPrefab))
             {
@@ -335,12 +397,11 @@ namespace TINB.ArticulatedBuses
                 return;
             }
 
-            /* Trailer origin in the front's local space when straight: the two sections share a rotation, so the
-               offset is simply the front attach point minus the trailer attach point */
+            // Trailer origin in the front's local space when straight
             float3 trailerOriginInFront = tractorData.m_AttachPosition - trailerData.m_AttachPosition;
             uint boardingMask = new ActivityMask(ActivityType.Enter).m_Mask | new ActivityMask(ActivityType.Exit).m_Mask;
 
-            // ensure the front buffer exists BEFORE taking buffer handles (AddBuffer is a structural change)
+            // Ensure the front buffer exists BEFORE taking buffer handles (AddBuffer is a structural change)
             if (!entityManager.HasBuffer<ActivityLocationElement>(busPrefab))
             {
                 entityManager.AddBuffer<ActivityLocationElement>(busPrefab);
@@ -349,13 +410,16 @@ namespace TINB.ArticulatedBuses
             DynamicBuffer<ActivityLocationElement> trailerLocations = entityManager.GetBuffer<ActivityLocationElement>(trailerPrefab);
             DynamicBuffer<ActivityLocationElement> frontLocations = entityManager.GetBuffer<ActivityLocationElement>(busPrefab);
 
+            // remember the front's own count so OnGamePreload can drop the copied doors when leaving the game
+            int originalCount = frontLocations.Length;
+
             int copied = 0;
             for (int i = 0; i < trailerLocations.Length; i++)
             {
                 ActivityLocationElement location = trailerLocations[i];
                 if ((location.m_ActivityMask.m_Mask & boardingMask) == 0)
                 {
-                    continue; // only boarding/alighting doors; skip driver/other slots
+                    continue; // only boarding/disembarking locations; skip others
                 }
 
                 location.m_Position += trailerOriginInFront;
@@ -363,13 +427,24 @@ namespace TINB.ArticulatedBuses
                 copied++;
             }
 
-            if (diagnosticLogging && copied > 0)
+            if (copied > 0)
             {
-                Mod.Log.InfoFormat("Copied {0} trailer boarding/alighting location(s) from {1} onto bus prefab {2}", copied, trailerPrefab, busPrefab);
+                m_SyncedActivityFronts[busPrefab] = originalCount;
+            }
+
+            if (copied > 0)
+            {
+                SessionLog.Diagnostic($"Copied {copied} trailer boarding/alighting location(s) from {trailerPrefab} onto bus prefab {busPrefab}");
             }
         }
 
-        /* True if any variation is Brand-sourced with external channels (i.e. eligible for livery syncing) */
+        /// <summary>
+        /// Check whether any variation is Brand-sourced with external channels
+        /// </summary>
+        /// <remarks>
+        /// Such a variation is eligible for transport line colors
+        /// </remarks>
+        /// <returns>True if at least one variation is Brand-sourced with external channels</returns>
         private static bool IsBrandSourced(DynamicBuffer<ColorVariation> variations)
         {
             for (int i = 0; i < variations.Length; i++)
@@ -383,12 +458,5 @@ namespace TINB.ArticulatedBuses
             return false;
         }
 
-        /* Prefab display name for the creator-facing session log (falls back to the entity id) */
-        private string TryGetPrefabName(Entity prefabEntity)
-        {
-            return m_PrefabSystem.TryGetPrefab<PrefabBase>(prefabEntity, out PrefabBase prefab)
-                ? prefab.name
-                : prefabEntity.ToString();
-        }
     }
 }
