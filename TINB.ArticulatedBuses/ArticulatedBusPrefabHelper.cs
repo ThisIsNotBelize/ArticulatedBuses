@@ -16,8 +16,17 @@ namespace TINB.ArticulatedBuses
         /// Check whether an instance is an articulated bus front
         /// </summary>
         /// <returns>True if the instance's prefab is an articulated bus front</returns>
+        /// <remarks>
+        /// Callers pass entities out of a query snapshot that may already be stale, so the instance is verified
+        /// before its PrefabRef is read: GetComponentData throws on a destroyed entity rather than returning a default
+        /// </remarks>
         public static bool IsArticulatedBusFrontEntity(EntityManager entityManager, Entity front)
         {
+            if (!entityManager.Exists(front) || !entityManager.HasComponent<PrefabRef>(front))
+            {
+                return false;
+            }
+
             Entity frontPrefab = entityManager.GetComponentData<PrefabRef>(front).m_Prefab;
             return IsArticulatedBusFrontPrefab(entityManager, frontPrefab);
         }
@@ -36,8 +45,17 @@ namespace TINB.ArticulatedBuses
         /// Check whether an instance is one of our articulated bus trailers
         /// </summary>
         /// <returns>True only for a Fixed trailer whose fixed tractor is a public-transport bus prefab</returns>
+        /// <remarks>
+        /// Guarded like <see cref="IsArticulatedBusFrontEntity"/>: the instance may already be gone by the time a
+        /// caller reaches it while walking a snapshot taken earlier in the frame
+        /// </remarks>
         public static bool IsArticulatedBusTrailerEntity(EntityManager entityManager, Entity trailer)
         {
+            if (!entityManager.Exists(trailer) || !entityManager.HasComponent<PrefabRef>(trailer))
+            {
+                return false;
+            }
+
             Entity trailerPrefab = entityManager.GetComponentData<PrefabRef>(trailer).m_Prefab;
             if (!entityManager.HasComponent<CarTrailerData>(trailerPrefab))
             {

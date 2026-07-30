@@ -1,3 +1,7 @@
+# Unreleased
+- Fix: resolved a crash to desktop caused by the orphan-trailer cleanup deleting trailers while iterating its own entity snapshot.
+- Fix: the "Remove all articulated buses" pre-removal cleanup used the same unsafe deletion pattern and is now deferred the same way.
+
 # v1.0.5
 - Optimisation: partly refactor of class structure for efficiency and optimisation
 - Improved: session logging

@@ -100,8 +100,12 @@ namespace TINB.ArticulatedBuses
 
             try
             {
-                // Delete the front and trailers (as layout members of fronts), mirroring vanilla VehicleUtils.DeleteVehicle
+                // Delete the front and trailers (as layout members of fronts), mirroring vanilla VehicleUtils.DeleteVehicle.
+                // Collected first and deleted after the scan: adding Deleted inside the loop is a structural change
+                // that invalidates the Allocator.Temp snapshot still being iterated.
                 NativeArray<Entity> fronts = m_FrontQuery.ToEntityArray(Allocator.Temp);
+                NativeList<Entity> frontsToDelete = new NativeList<Entity>(Allocator.Temp);
+                NativeList<Entity> membersToDelete = new NativeList<Entity>(Allocator.Temp);
                 try
                 {
                     for (int i = 0; i < fronts.Length; i++)
@@ -122,23 +126,36 @@ namespace TINB.ArticulatedBuses
                                 if (member != Entity.Null && member != front && entityManager.Exists(member) &&
                                     !entityManager.HasComponent<Deleted>(member))
                                 {
-                                    entityManager.AddComponent<Deleted>(member);
-                                    trailersDeleted++;
+                                    membersToDelete.Add(member);
                                 }
                             }
                         }
 
-                        entityManager.AddComponent<Deleted>(front);
+                        frontsToDelete.Add(front);
+                    }
+
+                    for (int i = 0; i < membersToDelete.Length; i++)
+                    {
+                        entityManager.AddComponent<Deleted>(membersToDelete[i]);
+                        trailersDeleted++;
+                    }
+
+                    for (int i = 0; i < frontsToDelete.Length; i++)
+                    {
+                        entityManager.AddComponent<Deleted>(frontsToDelete[i]);
                         frontsDeleted++;
                     }
                 }
                 finally
                 {
+                    membersToDelete.Dispose();
+                    frontsToDelete.Dispose();
                     fronts.Dispose();
                 }
 
                 // Delete orphan trailers
                 NativeArray<Entity> trailers = m_TrailerQuery.ToEntityArray(Allocator.Temp);
+                NativeList<Entity> trailersToDelete = new NativeList<Entity>(Allocator.Temp);
                 try
                 {
                     for (int i = 0; i < trailers.Length; i++)
@@ -149,12 +166,18 @@ namespace TINB.ArticulatedBuses
                             continue;
                         }
 
-                        entityManager.AddComponent<Deleted>(trailer);
+                        trailersToDelete.Add(trailer);
+                    }
+
+                    for (int i = 0; i < trailersToDelete.Length; i++)
+                    {
+                        entityManager.AddComponent<Deleted>(trailersToDelete[i]);
                         trailersDeleted++;
                     }
                 }
                 finally
                 {
+                    trailersToDelete.Dispose();
                     trailers.Dispose();
                 }
 

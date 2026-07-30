@@ -62,6 +62,11 @@ namespace TINB.ArticulatedBuses
 
             EntityManager entityManager = EntityManager;
             NativeArray<Entity> trailers = m_TrailerQuery.ToEntityArray(Allocator.Temp);
+            // Orphans are collected first and deleted after the scan. Adding Deleted inside the loop is a structural
+            // change that invalidates the Allocator.Temp snapshot still being iterated, so a later trailers[i] can
+            // come back stale; reading its Controller then throws out of GetEntityInChunk, and the dangling
+            // reference can take the process down from the game's own Burst systems.
+            NativeList<Entity> orphans = new NativeList<Entity>(Allocator.Temp);
 
             try
             {
@@ -85,9 +90,14 @@ namespace TINB.ArticulatedBuses
                         SessionLog.Diagnostic($"Deleting orphaned articulated bus trailer {trailer} prefab={ArticulatedBusPrefabHelper.GetPrefabName(m_PrefabSystem, trailerPrefab)} (controller {front} cause={cause})");
                     }
 
-                    // Flag deleted
-                    entityManager.AddComponent<Deleted>(trailer);
-                    SessionLog.Event($"deleted orphan trailer {trailer}");
+                    orphans.Add(trailer);
+                }
+
+                // Flag deleted, now that the scan is finished and nothing is iterating the snapshot
+                for (int i = 0; i < orphans.Length; i++)
+                {
+                    entityManager.AddComponent<Deleted>(orphans[i]);
+                    SessionLog.Event($"deleted orphan trailer {orphans[i]}");
                 }
             }
             catch (System.Exception ex)
@@ -96,6 +106,7 @@ namespace TINB.ArticulatedBuses
             }
             finally
             {
+                orphans.Dispose();
                 trailers.Dispose();
             }
         }
@@ -104,8 +115,18 @@ namespace TINB.ArticulatedBuses
         /// Check whether a trailer is orphaned
         /// </summary>
         /// <returns>True when the trailer's controlling front is null, already gone, or being deleted</returns>
+        /// <remarks>
+        /// The trailer itself is verified before its Controller is read: the entity comes from a snapshot taken
+        /// earlier in the frame, so it may already have been destroyed by another system by the time we get here.
+        /// Reading a component off a destroyed entity throws out of GetEntityInChunk instead of returning a default.
+        /// </remarks>
         private static bool IsOrphaned(EntityManager entityManager, Entity trailer)
         {
+            if (!entityManager.Exists(trailer) || !entityManager.HasComponent<Controller>(trailer))
+            {
+                return false;
+            }
+
             Entity front = entityManager.GetComponentData<Controller>(trailer).m_Controller;
             return front == Entity.Null || !entityManager.Exists(front) || entityManager.HasComponent<Deleted>(front);
         }
