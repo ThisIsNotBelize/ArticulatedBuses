@@ -1,10 +1,9 @@
-using Colossal.Collections;
 using Game;
 using Game.Objects;
 using Game.Prefabs;
 using Game.Rendering;
-using Game.Simulation;
 using Game.Vehicles;
+using Unity.Burst;
 using Unity.Collections;
 using Unity.Entities;
 using Unity.Jobs;
@@ -23,49 +22,38 @@ namespace TINB.ArticulatedBuses
     /// The bend is applied only to near-camera buses, so rig VehicleConnection bones on the high-detail LOD
     /// only. Reduced LODs (LOD1/LOD2) show at distances where the bend is not applied, so keep them rigid (no bone
     /// chains) for performance
+    /// The solve runs as a Burst job that takes the render culling list as an input dependency instead of blocking
+    /// on it, and writes only the runtime Bone buffers. The runtime skeletons themselves are owned by vanilla:
+    /// InitializeBonesSystem allocates them when a section's culling entry turns near-camera and clears them when it
+    /// leaves, so a section whose skeleton is still empty is skipped and bends from the next frame on
     /// Per-frame pipeline:
-    /// 1. OnUpdate picks the near-camera, multi-section, skeleton-bearing vehicles out of the render culling list
-    /// 2. TransformLayoutConnectionBones validates the bus and walks its layout, handing each section its layout neighbours
-    /// 3. TransformSectionConnectionBones ensures the section's runtime skeleton exists, then solves each connection
-    ///    submesh (bone-count math in EnsureVehicleRuntimeSkeletonInitialized and its helpers)
-    /// 4. SolveConnectionChain rotates the connection-bone chain toward the neighbour and pulls the cap (outmost) bone to the
+    /// 1. OnUpdate schedules ConnectionBoneJob against the render culling list
+    /// 2. ConnectionBoneJob.Execute picks the near-camera, multi-section, skeleton-bearing vehicles out of the list
+    /// 3. TransformLayoutConnectionBones validates the bus and walks its layout, handing each section its layout neighbours
+    /// 4. TransformSectionConnectionBones reads the neighbour poses and cap rest positions, then solves each connection submesh
+    /// 5. SolveConnectionChain rotates the connection-bone chain toward the neighbour and pulls the cap (outmost) bone to the
     ///    shared join point
     /// </remarks>
     public sealed partial class ArticulatedBusConnectionBoneSystem : GameSystemBase
     {
         private PreCullingSystem m_PreCullingSystem = null!;
-        private ProceduralSkeletonSystem m_ProceduralSkeletonSystem = null!;
 
         /// <summary>
-        /// BoneType.PlaybackLayer0..PlaybackLayer7 are 8 contiguous animation-layer bone types
-        /// </summary>
-        private const BoneType FirstPlaybackLayerBone = BoneType.PlaybackLayer0;
-        private const int PlaybackLayerCount = 8;
-
-        /// <summary>
-        /// Bytes per bone in the skeleton matrix heap
-        /// </summary>
-        /// <remarks>
-        /// One 4x4 float matrix
-        /// </remarks>
-        private const uint SkeletonMatrixByteSize = 64u;
-
-        /// <summary>
-        /// Caches the vanilla systems' culling data and skeleton heap
+        /// Caches the vanilla culling system
         /// </summary>
         protected override void OnCreate()
         {
             base.OnCreate();
             m_PreCullingSystem = World.GetOrCreateSystemManaged<PreCullingSystem>();
-            m_ProceduralSkeletonSystem = World.GetOrCreateSystemManaged<ProceduralSkeletonSystem>();
         }
 
         /// <summary>
-        /// Transform the connection bones of every articulated bus this frame
+        /// Schedule the connection-bone solve for every articulated bus this frame
         /// </summary>
         /// <remarks>
-        /// Pipeline step 1. Snapshots the render culling list and forwards each near-camera, multi-section,
-        /// skeleton-bearing vehicle to TransformLayoutConnectionBones
+        /// Pipeline step 1. The culling list's build job becomes an input dependency of the solve, and the solve is
+        /// registered as a reader of the list, mirroring vanilla InitializeBonesSystem. Nothing is completed on the
+        /// main thread
         /// </remarks>
         protected override void OnUpdate()
         {
@@ -74,467 +62,297 @@ namespace TINB.ArticulatedBuses
                 return;
             }
 
-            // Snapshot the render culling list (read-only) and wait for its build job before reading it
-            JobHandle cullingDeps;
-            NativeList<PreCullingData> cullingData = m_PreCullingSystem.GetCullingData(readOnly: true, out cullingDeps);
-            cullingDeps.Complete();
+            NativeList<PreCullingData> cullingData = m_PreCullingSystem.GetCullingData(readOnly: true, out JobHandle cullingDeps);
 
-            EntityManager entityManager = EntityManager;
-
-            // Only near-camera vehicles drawn as a multi-section layout with a skeleton get their connection bones transformed
-            for (int i = 0; i < cullingData.Length; i++)
+            ConnectionBoneJob job = new ConnectionBoneJob
             {
-                PreCullingData entry = cullingData[i];
-                if ((entry.m_Flags & (PreCullingFlags.NearCamera | PreCullingFlags.VehicleLayout | PreCullingFlags.Skeleton)) !=
-                    (PreCullingFlags.NearCamera | PreCullingFlags.VehicleLayout | PreCullingFlags.Skeleton))
+                m_CullingData = cullingData,
+                m_CarData = GetComponentLookup<Car>(isReadOnly: true),
+                m_PublicTransportData = GetComponentLookup<VehiclePublicTransport>(isReadOnly: true),
+                m_PrefabRefData = GetComponentLookup<PrefabRef>(isReadOnly: true),
+                m_CarTractorData = GetComponentLookup<CarTractorData>(isReadOnly: true),
+                m_ObjectGeometryData = GetComponentLookup<ObjectGeometryData>(isReadOnly: true),
+                m_InterpolatedTransformData = GetComponentLookup<InterpolatedTransform>(isReadOnly: true),
+                m_LayoutElements = GetBufferLookup<LayoutElement>(isReadOnly: true),
+                m_SubMeshes = GetBufferLookup<SubMesh>(isReadOnly: true),
+                m_ProceduralBones = GetBufferLookup<ProceduralBone>(isReadOnly: true),
+                m_Skeletons = GetBufferLookup<Skeleton>(isReadOnly: false),
+                m_Bones = GetBufferLookup<Bone>(isReadOnly: false)
+            };
+
+            JobHandle jobHandle = job.Schedule(JobHandle.CombineDependencies(Dependency, cullingDeps));
+            m_PreCullingSystem.AddCullingDataReader(jobHandle);
+            Dependency = jobHandle;
+        }
+
+        /// <summary>
+        /// Solve the connection-bone chains of every near-camera articulated bus
+        /// </summary>
+        /// <remarks>
+        /// A single-threaded Burst job over the render culling list, like vanilla InitializeBonesSystem. Only the
+        /// handful of near-camera buses ever reach the solve, so the list walk is the cheap part. Jobs cannot make
+        /// structural changes, so the layout and prefab buffers stay valid for the whole walk
+        /// </remarks>
+        [BurstCompile]
+        private struct ConnectionBoneJob : IJob
+        {
+            [ReadOnly] public NativeList<PreCullingData> m_CullingData;
+            [ReadOnly] public ComponentLookup<Car> m_CarData;
+            [ReadOnly] public ComponentLookup<VehiclePublicTransport> m_PublicTransportData;
+            [ReadOnly] public ComponentLookup<PrefabRef> m_PrefabRefData;
+            [ReadOnly] public ComponentLookup<CarTractorData> m_CarTractorData;
+            [ReadOnly] public ComponentLookup<ObjectGeometryData> m_ObjectGeometryData;
+            [ReadOnly] public ComponentLookup<InterpolatedTransform> m_InterpolatedTransformData;
+            [ReadOnly] public BufferLookup<LayoutElement> m_LayoutElements;
+            [ReadOnly] public BufferLookup<SubMesh> m_SubMeshes;
+            [ReadOnly] public BufferLookup<ProceduralBone> m_ProceduralBones;
+            public BufferLookup<Skeleton> m_Skeletons;
+            public BufferLookup<Bone> m_Bones;
+
+            /// <summary>
+            /// Walk the culling list and solve every near-camera, multi-section, skeleton-bearing vehicle
+            /// </summary>
+            /// <remarks>
+            /// Pipeline step 2
+            /// </remarks>
+            public void Execute()
+            {
+                const PreCullingFlags required = PreCullingFlags.NearCamera | PreCullingFlags.VehicleLayout | PreCullingFlags.Skeleton;
+
+                for (int i = 0; i < m_CullingData.Length; i++)
                 {
-                    continue;
+                    PreCullingData entry = m_CullingData[i];
+                    if ((entry.m_Flags & required) != required)
+                    {
+                        continue;
+                    }
+
+                    TransformLayoutConnectionBones(entry.m_Entity);
+                }
+            }
+
+            /// <summary>
+            /// Validate that root is an articulated bus, then transform the connection bones of every section in its layout
+            /// </summary>
+            /// <remarks>
+            /// Pipeline step 3. Each section (front or trailer) is passed its layout neighbours (the section ahead or
+            /// behind). Bails out unless root leads a real multi-section layout whose fixed trailer prefab is present
+            /// </remarks>
+            private void TransformLayoutConnectionBones(Entity root)
+            {
+                if (root == Entity.Null ||
+                    !m_CarData.HasComponent(root) ||
+                    !m_PublicTransportData.HasComponent(root) ||
+                    !m_InterpolatedTransformData.HasComponent(root) ||
+                    !m_PrefabRefData.TryGetComponent(root, out PrefabRef rootPrefabRef) ||
+                    !m_LayoutElements.TryGetBuffer(root, out DynamicBuffer<LayoutElement> layout))
+                {
+                    return;
                 }
 
-                TransformLayoutConnectionBones(entityManager, entry.m_Entity);
-            }
-        }
-
-        /// <summary>
-        /// Validate that root is an articulated bus, then transform the connection bones of every section in its layout
-        /// </summary>
-        /// <remarks>
-        /// Pipeline step 2. Each section (front or trailer) is passed its layout neighbours (the section ahead or
-        /// behind). Bails out unless root leads a real multi-section layout whose fixed trailer prefab is present
-        /// </remarks>
-        private void TransformLayoutConnectionBones(EntityManager entityManager, Entity root)
-        {
-            if (root == Entity.Null ||
-                !entityManager.HasBuffer<LayoutElement>(root) ||
-                !entityManager.HasComponent<Car>(root) ||
-                !entityManager.HasComponent<VehiclePublicTransport>(root) ||
-                !entityManager.HasComponent<PrefabRef>(root) ||
-                !entityManager.HasComponent<InterpolatedTransform>(root))
-            {
-                return;
-            }
-
-            // Require a real multi-section layout / trailer by this front (index 0 == root)
-            DynamicBuffer<LayoutElement> layout = entityManager.GetBuffer<LayoutElement>(root);
-            if (layout.Length < 2 || layout[0].m_Vehicle != root)
-            {
-                return;
-            }
-
-            PrefabRef rootPrefabRef = entityManager.GetComponentData<PrefabRef>(root);
-            Entity rootPrefab = rootPrefabRef.m_Prefab;
-            if (!entityManager.HasComponent<CarTractorData>(rootPrefab))
-            {
-                return;
-            }
-
-            CarTractorData tractorData = entityManager.GetComponentData<CarTractorData>(rootPrefab);
-            Entity fixedTrailerPrefab = tractorData.m_FixedTrailer;
-            if (fixedTrailerPrefab == Entity.Null || !LayoutContainsPrefab(entityManager, layout, fixedTrailerPrefab))
-            {
-                return;
-            }
-
-            // Transform each section's connection bones, handing it its layout neighbours (the section ahead and behind)
-            for (int i = 0; i < layout.Length; i++)
-            {
-                Entity previous = i > 0 ? layout[i - 1].m_Vehicle : Entity.Null;
-                Entity current = layout[i].m_Vehicle;
-                Entity next = i < layout.Length - 1 ? layout[i + 1].m_Vehicle : Entity.Null;
-
-                TransformSectionConnectionBones(entityManager, previous, current, next);
-            }
-        }
-
-        /// <summary>
-        /// Check if any layout member other than the lead uses the given prefab
-        /// </summary>
-        /// <remarks>
-        /// Guards step 2, confirming the front's fixed trailer prefab is actually present in the layout before bending
-        /// </remarks>
-        /// <returns>True if a non-lead member uses the prefab</returns>
-        private static bool LayoutContainsPrefab(EntityManager entityManager, DynamicBuffer<LayoutElement> layout, Entity prefab)
-        {
-            for (int i = 1; i < layout.Length; i++)
-            {
-                Entity vehicle = layout[i].m_Vehicle;
-                if (vehicle != Entity.Null &&
-                    entityManager.HasComponent<PrefabRef>(vehicle) &&
-                    entityManager.GetComponentData<PrefabRef>(vehicle).m_Prefab == prefab)
+                // Require a real multi-section layout / trailer by this front (index 0 == root)
+                if (layout.Length < 2 || layout[0].m_Vehicle != root)
                 {
+                    return;
+                }
+
+                if (!m_CarTractorData.TryGetComponent(rootPrefabRef.m_Prefab, out CarTractorData tractorData) ||
+                    tractorData.m_FixedTrailer == Entity.Null ||
+                    !LayoutContainsPrefab(layout, tractorData.m_FixedTrailer))
+                {
+                    return;
+                }
+
+                // Transform each section's connection bones, handing it its layout neighbours (the section ahead and behind)
+                for (int i = 0; i < layout.Length; i++)
+                {
+                    Entity previous = i > 0 ? layout[i - 1].m_Vehicle : Entity.Null;
+                    Entity current = layout[i].m_Vehicle;
+                    Entity next = i < layout.Length - 1 ? layout[i + 1].m_Vehicle : Entity.Null;
+
+                    TransformSectionConnectionBones(previous, current, next);
+                }
+            }
+
+            /// <summary>
+            /// Check if any layout member other than the lead uses the given prefab
+            /// </summary>
+            /// <remarks>
+            /// Guards step 3, confirming the front's fixed trailer prefab is actually present in the layout before bending
+            /// </remarks>
+            /// <returns>True if a non-lead member uses the prefab</returns>
+            private bool LayoutContainsPrefab(DynamicBuffer<LayoutElement> layout, Entity prefab)
+            {
+                for (int i = 1; i < layout.Length; i++)
+                {
+                    Entity vehicle = layout[i].m_Vehicle;
+                    if (vehicle != Entity.Null &&
+                        m_PrefabRefData.TryGetComponent(vehicle, out PrefabRef prefabRef) &&
+                        prefabRef.m_Prefab == prefab)
+                    {
+                        return true;
+                    }
+                }
+
+                return false;
+            }
+
+            /// <summary>
+            /// Transform one section's connection bones toward its layout neighbours
+            /// </summary>
+            /// <remarks>
+            /// Pipeline step 4. previous/next are the front/trailer sections on each side. Skips a section whose runtime
+            /// skeleton vanilla has not initialised yet (empty buffers), reads the neighbour poses and cap rest positions,
+            /// then solves each connection submesh
+            /// </remarks>
+            private void TransformSectionConnectionBones(Entity previous, Entity current, Entity next)
+            {
+                if (current == Entity.Null ||
+                    !m_PrefabRefData.TryGetComponent(current, out PrefabRef currentPrefabRef) ||
+                    !m_InterpolatedTransformData.TryGetComponent(current, out InterpolatedTransform currentInterpolated))
+                {
+                    return;
+                }
+
+                Entity currentPrefab = currentPrefabRef.m_Prefab;
+
+                // Only if geometry, submeshes and the vanilla-owned runtime skeleton buffers exist
+                if (!m_ObjectGeometryData.HasComponent(currentPrefab) ||
+                    !m_SubMeshes.TryGetBuffer(currentPrefab, out DynamicBuffer<SubMesh> subMeshes) ||
+                    !m_Skeletons.TryGetBuffer(current, out DynamicBuffer<Skeleton> skeletons) ||
+                    !m_Bones.TryGetBuffer(current, out DynamicBuffer<Bone> bones))
+                {
+                    return;
+                }
+
+                // Get layout neighbours' geometries and transforms
+                ObjectTransform currentTransform = currentInterpolated.ToTransform();
+                TryGetLayoutNeighbor(previous, out ObjectGeometryData previousGeometry, out ObjectTransform previousTransform);
+                TryGetLayoutNeighbor(next, out ObjectGeometryData nextGeometry, out ObjectTransform nextTransform);
+
+                // Rest positions of each neighbour's cap bone (the outermost connection bone), in its object space
+                float3 prevNeighborCapLocal = default(float3);
+                float3 nextNeighborCapLocal = default(float3);
+                bool hasPrevNeighborCap = previous != Entity.Null &&
+                    TryGetNeighborCapRestPositionLocal(previous, previousTransform, currentTransform, out prevNeighborCapLocal);
+                bool hasNextNeighborCap = next != Entity.Null &&
+                    TryGetNeighborCapRestPositionLocal(next, nextTransform, currentTransform, out nextNeighborCapLocal);
+
+                // An empty skeleton (not yet initialised by vanilla, or cleared after leaving near-camera) yields zero iterations
+                int skeletonCount = math.min(skeletons.Length, subMeshes.Length);
+                for (int skeletonIndex = 0; skeletonIndex < skeletonCount; skeletonIndex++)
+                {
+                    // Skip submeshes whose skeleton has no procedural bones
+                    ref Skeleton skeleton = ref skeletons.ElementAt(skeletonIndex);
+                    if (skeleton.m_BufferAllocation.Empty || skeleton.m_BoneOffset < 0)
+                    {
+                        continue;
+                    }
+
+                    // Only if bone exists in submesh
+                    if (!m_ProceduralBones.TryGetBuffer(subMeshes[skeletonIndex].m_SubMesh, out DynamicBuffer<ProceduralBone> proceduralBones))
+                    {
+                        continue;
+                    }
+
+                    // Count this submesh's VehicleConnection bones (per LOD). Each gets local fraction 0.5/N and the
+                    // parent hierarchy accumulates them to the half-angle, so a reduced LOD (e.g. N=1) self-adapts
+                    int connectionBoneCount = CountVehicleConnectionBones(proceduralBones);
+                    if (connectionBoneCount == 0)
+                    {
+                        continue;
+                    }
+
+                    // Bend this submesh's connection-bone chain toward the neighbour
+                    SolveConnectionChain(
+                        proceduralBones,
+                        bones,
+                        ref skeleton,
+                        previousGeometry,
+                        nextGeometry,
+                        previousTransform,
+                        currentTransform,
+                        nextTransform,
+                        connectionBoneCount,
+                        hasPrevNeighborCap,
+                        prevNeighborCapLocal,
+                        hasNextNeighborCap,
+                        nextNeighborCapLocal);
+                }
+            }
+
+            /// <summary>
+            /// Read a layout neighbour's geometry and interpolated transform
+            /// </summary>
+            /// <remarks>
+            /// Used by step 4 to gather each neighbour's pose before solving. A missing neighbour leaves the geometry
+            /// degenerate (zero-length bounds), which SolveConnectionChain reads as "no neighbour on that side"
+            /// </remarks>
+            /// <returns>False when the neighbour is null or lacks geometry/transform data</returns>
+            private bool TryGetLayoutNeighbor(Entity vehicle, out ObjectGeometryData geometryData, out ObjectTransform transform)
+            {
+                geometryData = default(ObjectGeometryData);
+                transform = default(ObjectTransform);
+
+                if (vehicle == Entity.Null ||
+                    !m_PrefabRefData.TryGetComponent(vehicle, out PrefabRef prefabRef) ||
+                    !m_InterpolatedTransformData.TryGetComponent(vehicle, out InterpolatedTransform interpolated) ||
+                    !m_ObjectGeometryData.TryGetComponent(prefabRef.m_Prefab, out geometryData))
+                {
+                    return false;
+                }
+
+                transform = interpolated.ToTransform();
+                return true;
+            }
+
+            /// <summary>
+            /// Compute a layout neighbour's cap-bone rest position in its object space
+            /// </summary>
+            /// <remarks>
+            /// Both layout sections (front / trailer) read each other's cap-bone rest position and average the two, so they
+            /// place the join between them at the same point
+            /// </remarks>
+            /// <returns>False if the neighbour has no readable connection bones</returns>
+            private bool TryGetNeighborCapRestPositionLocal(
+                Entity neighbor,
+                ObjectTransform neighborTransform,
+                ObjectTransform currentTransform,
+                out float3 capRestLocal)
+            {
+                // Layout neighbour must exist, reference a prefab, and that prefab must carry submeshes to read its bones from
+                capRestLocal = default(float3);
+                if (neighbor == Entity.Null ||
+                    !m_PrefabRefData.TryGetComponent(neighbor, out PrefabRef neighborPrefabRef) ||
+                    !m_SubMeshes.TryGetBuffer(neighborPrefabRef.m_Prefab, out DynamicBuffer<SubMesh> neighborSubMeshes))
+                {
+                    return false;
+                }
+
+                // Scan the neighbour's connection submesh and compute where its cap bone rests at the current angle/bend
+                for (int i = 0; i < neighborSubMeshes.Length; i++)
+                {
+                    if (!m_ProceduralBones.TryGetBuffer(neighborSubMeshes[i].m_SubMesh, out DynamicBuffer<ProceduralBone> neighborBones))
+                    {
+                        continue;
+                    }
+
+                    int n = CountVehicleConnectionBones(neighborBones);
+                    int neighborCapIndex = FindCapIndex(neighborBones);
+                    if (n == 0 || neighborCapIndex < 0)
+                    {
+                        continue;
+                    }
+
+                    // get the rotation angle
+                    quaternion relative = math.mul(math.inverse(neighborTransform.m_Rotation), currentTransform.m_Rotation);
+                    quaternion neighborChainRotation = math.slerp(quaternion.identity, relative, ArticulatedBusGeometryHelper.ConnectionBoneFraction(n));
+                    capRestLocal = ComputeBoneObjectMatrix(neighborBones, neighborCapIndex, neighborChainRotation).c3.xyz;
                     return true;
                 }
-            }
 
-            return false;
-        }
-
-        /// <summary>
-        /// Transform one section's connection bones toward its layout neighbours
-        /// </summary>
-        /// <remarks>
-        /// Pipeline step 3. previous/next are the front/trailer sections on each side. Ensures the runtime skeleton
-        /// exists, reads the neighbour poses and cap rest positions, then solves each connection submesh
-        /// </remarks>
-        private void TransformSectionConnectionBones(EntityManager entityManager, Entity previous, Entity current, Entity next)
-        {
-            if (current == Entity.Null ||
-                !entityManager.HasComponent<PrefabRef>(current) ||
-                !entityManager.HasComponent<InterpolatedTransform>(current))
-            {
-                return;
-            }
-
-            PrefabRef currentPrefabRef = entityManager.GetComponentData<PrefabRef>(current);
-            Entity currentPrefab = currentPrefabRef.m_Prefab;
-
-            // Only if geometry component and submesh buffer exist
-            if (!entityManager.HasComponent<ObjectGeometryData>(currentPrefab) ||
-                !entityManager.HasBuffer<SubMesh>(currentPrefab))
-            {
-                return;
-            }
-
-            // Only if runtime Skeleton + Bone buffers are initialised
-            EnsureVehicleRuntimeSkeletonInitialized(entityManager, current, currentPrefab);
-
-            if (!entityManager.HasBuffer<Skeleton>(current) ||
-                !entityManager.HasBuffer<Bone>(current))
-            {
-                return;
-            }
-
-            // Get layout neighbours' geometries and transforms
-            ObjectGeometryData previousGeometry = default(ObjectGeometryData);
-            ObjectGeometryData nextGeometry = default(ObjectGeometryData);
-
-            ObjectTransform previousTransform = default(ObjectTransform);
-            ObjectTransform currentTransform = entityManager.GetComponentData<InterpolatedTransform>(current).ToTransform();
-            ObjectTransform nextTransform = default(ObjectTransform);
-
-            TryGetLayoutNeighbor(entityManager, previous, out previousGeometry, out previousTransform);
-            TryGetLayoutNeighbor(entityManager, next, out nextGeometry, out nextTransform);
-
-            // Rest positions of each neighbour's cap bone (the outermost connection bone), in its object space
-            float3 prevNeighborCapLocal = default(float3);
-            float3 nextNeighborCapLocal = default(float3);
-            bool hasPrevNeighborCap = previous != Entity.Null &&
-                TryGetNeighborCapRestPositionLocal(entityManager, previous, previousTransform, currentTransform, out prevNeighborCapLocal);
-            bool hasNextNeighborCap = next != Entity.Null &&
-                TryGetNeighborCapRestPositionLocal(entityManager, next, nextTransform, currentTransform, out nextNeighborCapLocal);
-
-            // Get skeleton, bones and submeshes
-            DynamicBuffer<Skeleton> skeletons = entityManager.GetBuffer<Skeleton>(current);
-            DynamicBuffer<Bone> bones = entityManager.GetBuffer<Bone>(current);
-            DynamicBuffer<SubMesh> subMeshes = entityManager.GetBuffer<SubMesh>(currentPrefab);
-
-            int skeletonCount = math.min(skeletons.Length, subMeshes.Length);
-            for (int skeletonIndex = 0; skeletonIndex < skeletonCount; skeletonIndex++)
-            {
-                // Skip submeshes whose skeleton has no procedural bones
-                ref Skeleton skeleton = ref skeletons.ElementAt(skeletonIndex);
-                if (skeleton.m_BufferAllocation.Empty || skeleton.m_BoneOffset < 0)
-                {
-                    continue;
-                }
-
-                // Only if bone exists in submesh
-                Entity subMeshEntity = subMeshes[skeletonIndex].m_SubMesh;
-                if (!entityManager.HasBuffer<ProceduralBone>(subMeshEntity))
-                {
-                    continue;
-                }
-
-                DynamicBuffer<ProceduralBone> proceduralBones = entityManager.GetBuffer<ProceduralBone>(subMeshEntity);
-
-                // Count this submesh's VehicleConnection bones (per LOD). Each gets local fraction 0.5/N and the
-                // parent hierarchy accumulates them to the half-angle, so a reduced LOD (e.g. N=1) self-adapts
-                int connectionBoneCount = CountVehicleConnectionBones(proceduralBones);
-                if (connectionBoneCount == 0)
-                {
-                    continue;
-                }
-
-                // Bend this submesh's connection-bone chain toward the neighbour
-                SolveConnectionChain(
-                    proceduralBones,
-                    bones,
-                    ref skeleton,
-                    previousGeometry,
-                    nextGeometry,
-                    previousTransform,
-                    currentTransform,
-                    nextTransform,
-                    connectionBoneCount,
-                    hasPrevNeighborCap,
-                    prevNeighborCapLocal,
-                    hasNextNeighborCap,
-                    nextNeighborCapLocal);
-            }
-        }
-
-        /// <summary>
-        /// Ensure runtime Skeleton and Bone buffers exist and match the prefab's procedural bones
-        /// </summary>
-        /// <remarks>
-        /// Called by step 3 before solving. Mirrors vanilla ProceduralSkeletonSystem to write bone transforms. Needed
-        /// because a trailer spawned from an archetype may not have been initialized yet, or the buffers exist but are
-        /// the wrong size after a layout/mesh change
-        /// </remarks>
-        private void EnsureVehicleRuntimeSkeletonInitialized(EntityManager entityManager, Entity vehicle, Entity prefab)
-        {
-            if (!entityManager.HasBuffer<Skeleton>(vehicle))
-            {
-                entityManager.AddBuffer<Skeleton>(vehicle);
-            }
-
-            if (!entityManager.HasBuffer<Bone>(vehicle))
-            {
-                entityManager.AddBuffer<Bone>(vehicle);
-            }
-
-            DynamicBuffer<Skeleton> skeletons = entityManager.GetBuffer<Skeleton>(vehicle);
-            DynamicBuffer<Bone> bones = entityManager.GetBuffer<Bone>(vehicle);
-            DynamicBuffer<SubMesh> subMeshes = entityManager.GetBuffer<SubMesh>(prefab);
-
-            // Tally expected bone/layer counts across all submeshes and check whether the current buffers already match
-            int totalBoneCount = 0;
-            int playbackLayerCount = 0;
-            bool needsInitialization = skeletons.Length != subMeshes.Length;
-
-            for (int i = 0; i < subMeshes.Length; i++)
-            {
-                Entity subMeshEntity = subMeshes[i].m_SubMesh;
-                if (!entityManager.HasBuffer<ProceduralBone>(subMeshEntity))
-                {
-                    needsInitialization |= i >= skeletons.Length || skeletons[i].m_BoneOffset != -1;
-                    continue;
-                }
-
-                DynamicBuffer<ProceduralBone> proceduralBones = entityManager.GetBuffer<ProceduralBone>(subMeshEntity);
-                totalBoneCount += proceduralBones.Length;
-                playbackLayerCount += CountPlaybackLayers(proceduralBones);
-
-                if (!needsInitialization)
-                {
-                    if (i >= skeletons.Length)
-                    {
-                        needsInitialization = true;
-                    }
-                    else
-                    {
-                        Skeleton skeleton = skeletons[i];
-                        int expectedBoneOffset = totalBoneCount - proceduralBones.Length;
-                        needsInitialization |= skeleton.m_BufferAllocation.Empty || skeleton.m_BoneOffset != expectedBoneOffset;
-                    }
-                }
-            }
-
-            if (!needsInitialization &&
-                bones.Length == totalBoneCount &&
-                (!entityManager.HasBuffer<PlaybackLayer>(vehicle) || entityManager.GetBuffer<PlaybackLayer>(vehicle).Length == playbackLayerCount))
-            {
-                return;
-            }
-
-            // Borrow vanilla's skeleton-matrix heap so the bones live in the same GPU buffer it uploads
-            JobHandle heapDependencies;
-            NativeReference<ProceduralSkeletonSystem.AllocationInfo> allocationInfo;
-            NativeQueue<ProceduralSkeletonSystem.AllocationRemove> allocationRemoves;
-            int currentTime;
-            NativeHeapAllocator heapAllocator = m_ProceduralSkeletonSystem.GetHeapAllocator(out allocationInfo, out allocationRemoves, out currentTime, out heapDependencies);
-            heapDependencies.Complete();
-
-            DeallocateSkeletonBuffers(skeletons, allocationRemoves, currentTime);
-
-            skeletons.ResizeUninitialized(subMeshes.Length);
-            bones.ResizeUninitialized(totalBoneCount);
-
-            // Reset Momentum (per-bone motion history) to track the new bone count
-            DynamicBuffer<Momentum> momentums = default(DynamicBuffer<Momentum>);
-            if (entityManager.HasBuffer<Momentum>(vehicle))
-            {
-                momentums = entityManager.GetBuffer<Momentum>(vehicle);
-                momentums.ResizeUninitialized(totalBoneCount);
-                for (int i = 0; i < momentums.Length; i++)
-                {
-                    momentums[i] = default(Momentum);
-                }
-            }
-
-            // Resize the animation playback-layer buffer to match
-            DynamicBuffer<PlaybackLayer> playbackLayers = default(DynamicBuffer<PlaybackLayer>);
-            if (entityManager.HasBuffer<PlaybackLayer>(vehicle))
-            {
-                playbackLayers = entityManager.GetBuffer<PlaybackLayer>(vehicle);
-                playbackLayers.ResizeUninitialized(playbackLayerCount);
-            }
-
-            // Build each submesh's skeleton by reserving a heap block and copying its prefab rest-pose bones into the runtime buffer
-            int boneOffset = 0;
-            int layerOffset = 0;
-            for (int subMeshIndex = 0; subMeshIndex < subMeshes.Length; subMeshIndex++)
-            {
-                Entity subMeshEntity = subMeshes[subMeshIndex].m_SubMesh;
-                if (!entityManager.HasBuffer<ProceduralBone>(subMeshEntity))
-                {
-                    skeletons[subMeshIndex] = new Skeleton
-                    {
-                        m_BoneOffset = -1
-                    };
-                    continue;
-                }
-
-                // Reserve a heap block sized to this submesh's bone count, growing the heap if it is full
-                DynamicBuffer<ProceduralBone> proceduralBones = entityManager.GetBuffer<ProceduralBone>(subMeshEntity);
-                NativeHeapBlock bufferAllocation = heapAllocator.Allocate((uint)proceduralBones.Length);
-                if (bufferAllocation.Empty)
-                {
-                    heapAllocator.Resize(heapAllocator.Size + 1048576u / SkeletonMatrixByteSize);
-                    bufferAllocation = heapAllocator.Allocate((uint)proceduralBones.Length);
-                }
-
-                // Register the allocation in vanilla's bookkeeping
-                ref ProceduralSkeletonSystem.AllocationInfo info = ref allocationInfo.ValueAsRef();
-                info.m_AllocationCount++;
-
-                // Point this submesh's skeleton at its heap block plus its bone/layer offsets
-                Skeleton skeleton = new Skeleton
-                {
-                    m_BufferAllocation = bufferAllocation,
-                    m_BoneOffset = boneOffset,
-                    m_LayerOffset = layerOffset,
-                    m_CurrentUpdated = true,
-                    m_HistoryUpdated = true
-                };
-
-                // Copy each rest-pose bone into the runtime buffer and register its playback layer once
-                int usedPlaybackMask = 0;
-                for (int boneIndex = 0; boneIndex < proceduralBones.Length; boneIndex++)
-                {
-                    ProceduralBone proceduralBone = proceduralBones[boneIndex];
-                    skeleton.m_RequireHistory |= proceduralBone.m_ConnectionID != 0;
-
-                    bones[boneOffset++] = new Bone
-                    {
-                        m_Position = proceduralBone.m_Position,
-                        m_Rotation = proceduralBone.m_Rotation,
-                        m_Scale = proceduralBone.m_Scale
-                    };
-
-                    // Register this bone's playback layer (PlaybackLayer0..7 map to layers 0..7) the first time it appears
-                    if (playbackLayers.IsCreated)
-                    {
-                        int layerIndex = proceduralBone.m_Type - FirstPlaybackLayerBone;
-                        if (layerIndex >= 0 && layerIndex < PlaybackLayerCount)
-                        {
-                            int layerMask = 1 << layerIndex;
-                            if ((usedPlaybackMask & layerMask) == 0)
-                            {
-                                usedPlaybackMask |= layerMask;
-                                playbackLayers[layerOffset++] = new PlaybackLayer
-                                {
-                                    m_ClipIndex = -1,
-                                    m_LayerIndex = (byte)layerIndex
-                                };
-                            }
-                        }
-                    }
-                }
-
-                skeletons[subMeshIndex] = skeleton;
-            }
-
-            // Flag to game, that the skeleton heap was written so it syncs before the GPU upload
-            m_ProceduralSkeletonSystem.AddHeapWriter(default(JobHandle));
-        }
-
-        /// <summary>
-        /// Queue the existing skeleton heap allocations for release
-        /// </summary>
-        /// <remarks>
-        /// Called by EnsureVehicleRuntimeSkeletonInitialized before it reallocates the heap blocks
-        /// </remarks>
-        private static void DeallocateSkeletonBuffers(DynamicBuffer<Skeleton> skeletons, NativeQueue<ProceduralSkeletonSystem.AllocationRemove> allocationRemoves, int currentTime)
-        {
-            for (int i = 0; i < skeletons.Length; i++)
-            {
-                Skeleton skeleton = skeletons[i];
-                if (!skeleton.m_BufferAllocation.Empty)
-                {
-                    allocationRemoves.Enqueue(new ProceduralSkeletonSystem.AllocationRemove
-                    {
-                        m_Allocation = skeleton.m_BufferAllocation,
-                        m_RemoveTime = currentTime
-                    });
-                }
-            }
-        }
-
-        /// <summary>
-        /// Count the distinct playback layers used by a submesh's bones
-        /// </summary>
-        /// <remarks>
-        /// PlaybackLayer0..7. Used while sizing the runtime skeleton's playback-layer buffer
-        /// </remarks>
-        /// <returns>The number of distinct playback layers in use</returns>
-        private static int CountPlaybackLayers(DynamicBuffer<ProceduralBone> proceduralBones)
-        {
-            int usedMask = 0;
-            int count = 0;
-            for (int i = 0; i < proceduralBones.Length; i++)
-            {
-                int layerIndex = proceduralBones[i].m_Type - FirstPlaybackLayerBone;
-                if (layerIndex < 0 || layerIndex >= PlaybackLayerCount)
-                {
-                    continue;
-                }
-
-                int layerMask = 1 << layerIndex;
-                if ((usedMask & layerMask) != 0)
-                {
-                    continue;
-                }
-
-                usedMask |= layerMask;
-                count++;
-            }
-
-            return count;
-        }
-
-        /// <summary>
-        /// Read a layout neighbour's geometry and interpolated transform
-        /// </summary>
-        /// <remarks>
-        /// Used by step 3 to gather each neighbour's pose before solving
-        /// </remarks>
-        /// <returns>False when the neighbour is null or lacks geometry/transform data</returns>
-        private static bool TryGetLayoutNeighbor(
-            EntityManager entityManager,
-            Entity vehicle,
-            out ObjectGeometryData geometryData,
-            out ObjectTransform transform)
-        {
-            geometryData = default(ObjectGeometryData);
-            transform = default(ObjectTransform);
-
-            if (vehicle == Entity.Null ||
-                !entityManager.HasComponent<PrefabRef>(vehicle) ||
-                !entityManager.HasComponent<InterpolatedTransform>(vehicle))
-            {
                 return false;
             }
-
-            Entity prefab = entityManager.GetComponentData<PrefabRef>(vehicle).m_Prefab;
-            if (!entityManager.HasComponent<ObjectGeometryData>(prefab))
-            {
-                return false;
-            }
-
-            geometryData = entityManager.GetComponentData<ObjectGeometryData>(prefab);
-            transform = entityManager.GetComponentData<InterpolatedTransform>(vehicle).ToTransform();
-            return true;
         }
 
         /// <summary>
@@ -589,71 +407,14 @@ namespace TINB.ArticulatedBuses
         }
 
         /// <summary>
-        /// Compute a layout neighbour's cap-bone rest position in its object space
-        /// </summary>
-        /// <remarks>
-        /// Both layout sections (front / trailer) read each other's cap-bone rest position and average the two, so they
-        /// place the join between them at the same point
-        /// </remarks>
-        /// <returns>False if the neighbour has no readable connection bones</returns>
-        private bool TryGetNeighborCapRestPositionLocal(
-            EntityManager entityManager,
-            Entity neighbor,
-            ObjectTransform neighborTransform,
-            ObjectTransform currentTransform,
-            out float3 capRestLocal)
-        {
-            // Layout neighbour must exist and reference a prefab
-            capRestLocal = default(float3);
-            if (neighbor == Entity.Null || !entityManager.HasComponent<PrefabRef>(neighbor))
-            {
-                return false;
-            }
-
-            // Neighbour prefab must carry submeshes to read its bones from
-            Entity neighborPrefab = entityManager.GetComponentData<PrefabRef>(neighbor).m_Prefab;
-            if (!entityManager.HasBuffer<SubMesh>(neighborPrefab))
-            {
-                return false;
-            }
-
-            // Scan the neighbour's connection submesh and compute where its cap bone rests at the current angle/bend
-            DynamicBuffer<SubMesh> neighborSubMeshes = entityManager.GetBuffer<SubMesh>(neighborPrefab);
-            for (int i = 0; i < neighborSubMeshes.Length; i++)
-            {
-                Entity subMeshEntity = neighborSubMeshes[i].m_SubMesh;
-                if (!entityManager.HasBuffer<ProceduralBone>(subMeshEntity))
-                {
-                    continue;
-                }
-
-                DynamicBuffer<ProceduralBone> neighborBones = entityManager.GetBuffer<ProceduralBone>(subMeshEntity);
-                int n = CountVehicleConnectionBones(neighborBones);
-                int neighborCapIndex = FindCapIndex(neighborBones);
-                if (n == 0 || neighborCapIndex < 0)
-                {
-                    continue;
-                }
-
-                // get the rotation angle
-                quaternion relative = math.mul(math.inverse(neighborTransform.m_Rotation), currentTransform.m_Rotation);
-                quaternion neighborChainRotation = math.slerp(quaternion.identity, relative, ArticulatedBusGeometryHelper.ConnectionBoneFraction(n));
-                capRestLocal = ComputeBoneObjectMatrix(neighborBones, neighborCapIndex, neighborChainRotation).c3.xyz;
-                return true;
-            }
-
-            return false;
-        }
-
-        /// <summary>
         /// Bend one submesh's connection-bone chain toward the neighbour
         /// </summary>
         /// <remarks>
-        /// Pipeline step 4. Every connection bone gets the same local rotation slerp(identity, neighborRotation, 0.5/N)
+        /// Pipeline step 5. Every connection bone gets the same local rotation slerp(identity, neighborRotation, 0.5/N)
         /// Only the cap bone (outermost bone) is additionally moved to match the world-space midpoint of the two layouts
         /// / front and trailer rest positions (symmetric, so both sections agree and the connection stays tight)
         /// </remarks>
-        private void SolveConnectionChain(
+        private static void SolveConnectionChain(
             DynamicBuffer<ProceduralBone> proceduralBones,
             DynamicBuffer<Bone> bones,
             ref Skeleton skeleton,
@@ -773,19 +534,32 @@ namespace TINB.ArticulatedBuses
         /// Composes its own position/rotation/scale (a TRS matrix) with its parent's. Connection bones use the current
         /// chain (bend) rotation, all others use their authored rotation, so the result matches how the game builds its
         /// skin matrices
+        /// Walks the parent chain iteratively, like the game's own bone hierarchy walks (ObjectInterpolateSystem
+        /// LocalToWorld / LocalToObject). The step cap bounds a malformed third-party rig whose parent indices form a
+        /// cycle: a well-formed hierarchy is never deeper than it has bones
         /// </remarks>
         /// <returns>The bone's object-space transform matrix</returns>
         private static float4x4 ComputeBoneObjectMatrix(DynamicBuffer<ProceduralBone> proceduralBones, int index, quaternion chainRotation)
         {
-            ProceduralBone bone = proceduralBones[index];
-            quaternion rotation = bone.m_Type == BoneType.VehicleConnection ? chainRotation : bone.m_Rotation;
-            float4x4 local = float4x4.TRS(bone.m_Position, rotation, bone.m_Scale);
-            if (bone.m_ParentIndex < 0 || bone.m_ParentIndex >= proceduralBones.Length)
+            float4x4 objectMatrix = float4x4.identity;
+
+            for (int step = 0; step < proceduralBones.Length; step++)
             {
-                return local;
+                if (index < 0 || index >= proceduralBones.Length)
+                {
+                    break;
+                }
+
+                ProceduralBone bone = proceduralBones[index];
+                quaternion rotation = bone.m_Type == BoneType.VehicleConnection ? chainRotation : bone.m_Rotation;
+                float4x4 local = float4x4.TRS(bone.m_Position, rotation, bone.m_Scale);
+
+                // Parent-first composition, so the accumulated matrix stays parent * ... * self
+                objectMatrix = math.mul(local, objectMatrix);
+                index = bone.m_ParentIndex;
             }
 
-            return math.mul(ComputeBoneObjectMatrix(proceduralBones, bone.m_ParentIndex, chainRotation), local);
+            return objectMatrix;
         }
 
         /// <summary>

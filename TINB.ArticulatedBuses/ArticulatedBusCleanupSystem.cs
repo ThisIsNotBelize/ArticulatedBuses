@@ -115,16 +115,31 @@ namespace TINB.ArticulatedBuses
 
                         if (entityManager.HasBuffer<LayoutElement>(front))
                         {
+                            // Snapshot the members before deleting any of them: flagging a member is a structural
+                            // change, which invalidates the live layout buffer while it is still being walked
                             DynamicBuffer<LayoutElement> layout = entityManager.GetBuffer<LayoutElement>(front);
+                            NativeArray<Entity> members = new NativeArray<Entity>(layout.Length, Allocator.Temp);
                             for (int j = 0; j < layout.Length; j++)
                             {
-                                Entity member = layout[j].m_Vehicle;
-                                if (member != Entity.Null && member != front && entityManager.Exists(member) &&
-                                    !entityManager.HasComponent<Deleted>(member))
+                                members[j] = layout[j].m_Vehicle;
+                            }
+
+                            try
+                            {
+                                for (int j = 0; j < members.Length; j++)
                                 {
-                                    entityManager.AddComponent<Deleted>(member);
-                                    trailersDeleted++;
+                                    Entity member = members[j];
+                                    if (member != Entity.Null && member != front && entityManager.Exists(member) &&
+                                        !entityManager.HasComponent<Deleted>(member))
+                                    {
+                                        entityManager.AddComponent<Deleted>(member);
+                                        trailersDeleted++;
+                                    }
                                 }
+                            }
+                            finally
+                            {
+                                members.Dispose();
                             }
                         }
 

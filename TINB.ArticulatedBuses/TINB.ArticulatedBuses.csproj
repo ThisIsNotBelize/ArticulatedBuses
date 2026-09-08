@@ -45,7 +45,7 @@
 
   <PropertyGroup>
     <ModId>148570</ModId>
-    <Version>1.0.5</Version>
+    <Version>1.0.6</Version>
     <GameVersion>1.6.*</GameVersion>
     <ThumbnailPath>Properties/Thumbnail.png</ThumbnailPath>
     <DisplayName>Articulated Buses</DisplayName>
@@ -106,6 +106,10 @@
     </Reference>
     <Reference Include="Unity.Entities">
       <HintPath>$(Cities2ManagedDir)\Unity.Entities.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="Unity.Burst">
+      <HintPath>$(Cities2ManagedDir)\Unity.Burst.dll</HintPath>
       <Private>false</Private>
     </Reference>
     <Reference Include="Unity.Mathematics">

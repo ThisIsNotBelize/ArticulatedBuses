@@ -100,10 +100,6 @@ namespace TINB.ArticulatedBuses
             // Remove all articulated buses (triggered manually by user via options-page button; e.g. before mod removal)
             updateSystem.UpdateAfter<ArticulatedBusCleanupSystem, ArticulatedBusOrphanTrailerCleanupSystem>(SystemUpdatePhase.Modification5);
 
-            // Legacy Fix for 1.0.1 parked fronts
-            // @TODO: Remove in any new version released after 31 July 2026
-            updateSystem.UpdateAfter<ArticulatedBusParkedFrontFixSystem, ArticulatedBusCleanupSystem>(SystemUpdatePhase.Modification5);
-
 
             // Rendering
 

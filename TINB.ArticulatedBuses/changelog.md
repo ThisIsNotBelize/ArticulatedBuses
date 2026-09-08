@@ -1,3 +1,9 @@
+# v1.0.6
+- Optimisation: the bendy-section animation now runs as a Burst job and no longer waits on the render culling data on the main thread; the game itself manages the animation skeletons (credit: derdavid34 on GitHub, for the profiling report and the job-based design)
+- Improved: added safety guards to the bendy-section rendering for unusual or malformed bone setups in third-party assets
+- Fix: the "Remove all articulated buses" cleanup and the custom-color sync no longer modify vehicles while still reading a bus's layout list (credit: makemake on GitHub, whose pull request surfaced this)
+- Removed: the one-time compatibility fix for save games created with v1.0.1, which is no longer needed
+
 # v1.0.5
 - Optimisation: partly refactor of class structure for efficiency and optimisation
 - Improved: session logging

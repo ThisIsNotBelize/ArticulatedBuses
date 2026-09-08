@@ -179,9 +179,39 @@ namespace TINB.ArticulatedBuses
                 return; // front unchanged since last sync -> leave trailer (and any manual trailer edit) alone
             }
 
-            for (int i = 1; i < layout.Length; i++)
+            // Snapshot the members before the loop: ApplyCustomColor can add the trailer's CustomMeshColor buffer,
+            // and that structural change invalidates the live layout buffer this loop would keep walking
+            NativeArray<Entity> sections = new NativeArray<Entity>(layout.Length, Allocator.Temp);
+            for (int i = 0; i < layout.Length; i++)
             {
-                Entity trailer = layout[i].m_Vehicle;
+                sections[i] = layout[i].m_Vehicle;
+            }
+
+            try
+            {
+                SyncTrailers(entityManager, commandBuffer, root, sections, current, customChanged, routeChanged);
+            }
+            finally
+            {
+                sections.Dispose();
+            }
+
+            m_LastSyncedFront[root] = current;
+        }
+
+        /// <summary>
+        /// Push the front's color to each Brand-sourced trailer in the layout
+        /// </summary>
+        /// <remarks>
+        /// Works off a member snapshot rather than the live layout buffer, because applying a custom color can add the
+        /// trailer's CustomMeshColor buffer and that structural change would invalidate the buffer mid-walk
+        /// </remarks>
+        private void SyncTrailers(EntityManager entityManager, EntityCommandBuffer commandBuffer, Entity root,
+            NativeArray<Entity> sections, FrontColorState current, bool customChanged, bool routeChanged)
+        {
+            for (int i = 1; i < sections.Length; i++)
+            {
+                Entity trailer = sections[i];
                 if (trailer == Entity.Null)
                 {
                     continue;
@@ -211,8 +241,6 @@ namespace TINB.ArticulatedBuses
                     commandBuffer.AddComponent<BatchesUpdated>(trailer);
                 }
             }
-
-            m_LastSyncedFront[root] = current;
         }
 
         /// <summary>
