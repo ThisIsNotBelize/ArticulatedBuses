@@ -111,5 +111,6 @@ Final note: this mod was created with some help from coding agents.</LongDescrip
 # v1.0.0
 Initial release.</ChangeLog>
   <Tag Value="Code Mod" />
+  <ExternalLink Type="github" Url="https://github.com/ThisIsNotBelize/ArticulatedBuses" />
   <AccessLevel Value="Public" />
 </Publish>
